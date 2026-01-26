@@ -1,17 +1,17 @@
 name: APK to Telegram
 
 on:
-  workflow_dispatch:   # 手动触发
+  workflow_dispatch:   # 支持手动触发
   schedule:
-    - cron: '0 12 * * *'  # 可调整时间
+    - cron: '0 12 * * *'  # 每天 UTC 12:00 执行，可按需修改
 
 jobs:
   push-apks:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Clone 主仓库
-      - name: Clone FongMi/Release repository
+      # 1️⃣ 克隆主分支
+      - name: Clone repo
         run: |
           git clone https://github.com/FongMi/Release.git release_temp
 
@@ -24,20 +24,17 @@ jobs:
           key: apk-uploaded-list
           restore-keys: apk-uploaded-list
 
-      # 3️⃣ 上传 APK 到 Telegram
+      # 3️⃣ 上传 APK 文件到 Telegram
       - name: Upload APKs to Telegram
         env:
           BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # 确保记录文件存在
           touch uploaded_apks.txt
-
-          # 进入 APK 所在目录
           cd release_temp/apk/release || exit 1
 
           for APK_FILE in *.apk; do
-            # 已上传则跳过
+            # 跳过已上传的
             if grep -Fxq "$APK_FILE" ../../uploaded_apks.txt; then
               echo "$APK_FILE 已上传，跳过"
               continue
@@ -46,17 +43,17 @@ jobs:
             # 当前 UTC 时间
             TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
 
-            echo "上传 $APK_FILE ..."
-            
-            # 上传文件 + 带文件名和时间说明
+            echo "Uploading $APK_FILE..."
+
+            # 上传并加 caption
             curl -X POST "$BOT_API_URL" \
                  -F "chat_id=$CHAT_ID" \
                  -F "document=@$APK_FILE" \
                  -F "caption=📦 文件: $APK_FILE\n🕒 上传时间: $TIMESTAMP"
 
-            echo "$APK_FILE 上传完成"
+            echo "$APK_FILE uploaded!"
 
-            # 记录已上传
+            # 记录
             echo "$APK_FILE" >> ../../uploaded_apks.txt
           done
 
