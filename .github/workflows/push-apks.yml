@@ -1,48 +1,52 @@
-name: APK to Telegram
+name: Push FongMi APKs to Telegram
 
 on:
-  workflow_dispatch:   # 手动触发
-  release:
-    types: [published] # 发布 Release 时也会触发
+  workflow_dispatch:   # 支持手动触发
+  schedule:
+    - cron: '0 12 * * *'  # 每天 UTC 12:00，可按需修改
 
 jobs:
-  send-apk:
+  push-apks:
     runs-on: ubuntu-latest
+
     steps:
-      # 第一步：拉取 FongMi Release 仓库
-      - name: Checkout FongMi Release repo
-        uses: actions/checkout@v3
-        with:
-          repository: FongMi/Release
-
-      # 第二步：列出 APK 文件
-      - name: List APK files
+      # 1️⃣ Clone 主仓库
+      - name: Clone FongMi/Release repository
         run: |
-          echo "以下是 apk/release 目录里的 APK 文件："
-          ls -lh ./apk/release/*.apk
+          git clone https://github.com/FongMi/Release.git release_temp
 
-      # 第三步：发送提示消息到 Telegram
-      - name: Send release note to Telegram
+      # 2️⃣ 上传 APK 文件到 Telegram
+      - name: Upload APKs to Telegram
+        env:
+          BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          curl -X POST \
-            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -F text="📢 新版本 APK 已同步到频道！" \
-            ${{ secrets.TELEGRAM_BOT_API_URL }}/sendMessage
+          # 创建临时记录文件，避免重复上传
+          touch uploaded_apks.txt
 
-      # 第四步：循环上传所有 APK 文件
-      - name: Upload all APKs
-        run: |
-          for file in ./apk/release/*.apk; do
-            echo "准备上传: $file"
-            if [ -f "$file" ]; then
-              ls -lh "$file"
-              curl -v -X POST \
-                -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-                -F document=@"$file" \
-                ${{ secrets.TELEGRAM_BOT_API_URL }}/sendDocument \
-                || echo "❌ 上传失败: $file"
-            else
-              echo "❌ 文件不存在: $file"
-              exit 1
+          # 进入 APK 目录
+          cd release_temp/apk/release || exit 1
+
+          for APK_FILE in *.apk; do
+            # 如果已上传，则跳过
+            if grep -Fxq "$APK_FILE" ../../uploaded_apks.txt; then
+              echo "$APK_FILE 已上传，跳过"
+              continue
             fi
+
+            # 获取 UTC 时间
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+
+            echo "上传 $APK_FILE ..."
+
+            # 上传文件并附加文件名 + 上传时间
+            curl -X POST "$BOT_API_URL" \
+                 -F "chat_id=$CHAT_ID" \
+                 -F "document=@$APK_FILE" \
+                 -F "caption=📦 文件: $APK_FILE\n🕒 上传时间: $TIMESTAMP"
+
+            echo "$APK_FILE 上传完成"
+
+            # 记录已上传文件
+            echo "$APK_FILE" >> ../../uploaded_apks.txt
           done
