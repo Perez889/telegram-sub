@@ -1,35 +1,3 @@
-name: APK to Telegram
-
-on:
-  workflow_dispatch:   # 手动触发测试
-
-jobs:
-  test-apk:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout FongMi Release repo
-        uses: actions/checkout@v3
-        with:
-          repository: FongMi/Release
-
-      - name: List APK files
-        run: |
-          echo "以下是找到的 APK 文件："
-          find apk/release -name "*.apk"
-
-      - name: Send test message to Telegram
-        run: |
-          curl -X POST \
-            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -F text="✅ 测试成功！我已经能连接到 Telegram Bot API。" \
-            ${{ secrets.TELEGRAM_BOT_API_URL }}/sendMessage
-
-      - name: Upload one APK for test
-        run: |
-          file=$(find apk/release -name "*.apk" | head -n 1)
-          echo "上传测试文件: $file"
-          curl -X POST \
-            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -F document=@$file \
-            ${{ secrets.TELEGRAM_BOT_API_URL }}/sendDocument \
-            || echo "❌ 上传失败: $file"
+- name: Debug APK path
+  run: |
+    find apk/release -name "*.apk"
