@@ -9,19 +9,16 @@ jobs:
   send-apk:
     runs-on: ubuntu-latest
     steps:
-      # 第一步：拉取 FongMi Release 仓库
       - name: Checkout FongMi Release repo
         uses: actions/checkout@v3
         with:
           repository: FongMi/Release
 
-      # 第二步：列出 APK 文件
       - name: List APK files
         run: |
           echo "以下是 apk/release 目录里的 APK 文件："
           ls -lh ./apk/release/*.apk
 
-      # 第三步：发送提示消息到 Telegram
       - name: Send release note to Telegram
         run: |
           curl -X POST \
@@ -29,7 +26,6 @@ jobs:
             -F text="📢 新版本 APK 已同步到频道！" \
             ${{ secrets.TELEGRAM_BOT_API_URL }}/sendMessage
 
-      # 第四步：循环上传所有 APK 文件
       - name: Upload all APKs
         run: |
           for file in ./apk/release/*.apk; do
