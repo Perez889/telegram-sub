@@ -1,3 +1,5 @@
 - name: Debug APK path
   run: |
-    find apk/release -name "*.apk"
+    echo "当前目录: $(pwd)"
+    ls -l ./apk/release
+    find ./apk/release -name "*.apk"
