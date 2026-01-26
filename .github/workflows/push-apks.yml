@@ -1,0 +1,64 @@
+name: Push FongMi APKs to Telegram
+
+# 触发方式：手动或定时
+on:
+  workflow_dispatch:   # 手动触发
+  schedule:
+    - cron: '0 12 * * *'  # 每天 UTC 12:00 执行一次，可修改
+
+jobs:
+  push-apks:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout fongmi/apk 分支
+      - name: Checkout fongmi/apk branch
+        uses: actions/checkout@v3
+        with:
+          repository: FongMi/Release
+          ref: fongmi/apk
+
+      # 2️⃣ 恢复已上传 APK 列表（缓存）
+      - name: Restore uploaded APK list
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: uploaded_apks.txt
+          key: apk-uploaded-list
+          restore-keys: apk-uploaded-list
+
+      # 3️⃣ 上传 APK 文件到 Telegram
+      - name: Upload APKs to Telegram
+        env:
+          BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          mkdir -p apk_uploaded
+          touch uploaded_apks.txt
+
+          cd apk || exit 1
+          
+          for APK_FILE in *.apk; do
+            # 检查是否已上传
+            if grep -Fxq "$APK_FILE" ../uploaded_apks.txt; then
+              echo "$APK_FILE 已上传，跳过"
+              continue
+            fi
+
+            echo "上传 $APK_FILE 到 Telegram..."
+            curl -X POST "$BOT_API_URL" \
+                 -F "chat_id=$CHAT_ID" \
+                 -F "document=@$APK_FILE"
+
+            echo "$APK_FILE 上传完成"
+
+            # 记录已上传文件
+            echo "$APK_FILE" >> ../uploaded_apks.txt
+          done
+
+      # 4️⃣ 保存更新后的已上传名单到缓存
+      - name: Save uploaded APK list
+        uses: actions/cache@v3
+        with:
+          path: uploaded_apks.txt
+          key: apk-uploaded-list
