@@ -1,65 +1,36 @@
 name: APK to Telegram
 
 on:
-  workflow_dispatch:   # 支持手动触发
-  schedule:
-    - cron: '0 12 * * *'  # 每天 UTC 12:00 执行，可按需修改
+  workflow_dispatch:   # 手动触发测试
 
 jobs:
-  push-apks:
+  test-apk:
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ 克隆主分支
-      - name: Clone repo
-        run: |
-          git clone https://github.com/FongMi/Release.git release_temp
-
-      # 2️⃣ 恢复已上传 APK 列表（缓存）
-      - name: Restore uploaded APK list
-        id: cache
-        uses: actions/cache@v3
+      - name: Checkout FongMi Release repo
+        uses: actions/checkout@v3
         with:
-          path: uploaded_apks.txt
-          key: apk-uploaded-list
-          restore-keys: apk-uploaded-list
+          repository: FongMi/Release
+          ref: fongmi/apk
 
-      # 3️⃣ 上传 APK 文件到 Telegram
-      - name: Upload APKs to Telegram
-        env:
-          BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: List APK files
         run: |
-          touch uploaded_apks.txt
-          cd release_temp/apk/release || exit 1
+          echo "以下是找到的 APK 文件："
+          find . -name "*.apk"
 
-          for APK_FILE in *.apk; do
-            # 跳过已上传的
-            if grep -Fxq "$APK_FILE" ../../uploaded_apks.txt; then
-              echo "$APK_FILE 已上传，跳过"
-              continue
-            fi
+      - name: Send test message to Telegram
+        run: |
+          curl -X POST \
+            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            -F text="✅ 测试成功！我已经能连接到 Telegram Bot API。" \
+            ${{ secrets.TELEGRAM_BOT_API_URL }}/sendMessage
 
-            # 当前 UTC 时间
-            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
-
-            echo "Uploading $APK_FILE..."
-
-            # 上传并加 caption
-            curl -X POST "$BOT_API_URL" \
-                 -F "chat_id=$CHAT_ID" \
-                 -F "document=@$APK_FILE" \
-                 -F "caption=📦 文件: $APK_FILE\n🕒 上传时间: $TIMESTAMP"
-
-            echo "$APK_FILE uploaded!"
-
-            # 记录
-            echo "$APK_FILE" >> ../../uploaded_apks.txt
-          done
-
-      # 4️⃣ 保存上传记录
-      - name: Save uploaded APK list
-        uses: actions/cache@v3
-        with:
-          path: uploaded_apks.txt
-          key: apk-uploaded-list
+      - name: Upload one APK for test
+        run: |
+          file=$(find . -name "*.apk" | head -n 1)
+          echo "上传测试文件: $file"
+          curl -X POST \
+            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            -F document=@$file \
+            ${{ secrets.TELEGRAM_BOT_API_URL }}/sendDocument \
+            || echo "❌ 上传失败: $file"
