@@ -3,17 +3,17 @@ name: APK to Telegram
 on:
   workflow_dispatch:   # 手动触发
   schedule:
-    - cron: '0 12 * * *'  # 每天 UTC 12:00，可修改
+    - cron: '0 12 * * *'  # 可调整时间
 
 jobs:
   push-apks:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Clone fongmi/apk 分支（稳定方式）
-      - name: Clone FongMi/Release fongmi/apk branch
+      # 1️⃣ Clone 主仓库
+      - name: Clone FongMi/Release repository
         run: |
-          git clone --single-branch --branch fongmi/apk https://github.com/FongMi/Release.git release_temp
+          git clone https://github.com/FongMi/Release.git release_temp
 
       # 2️⃣ 恢复已上传 APK 列表（缓存）
       - name: Restore uploaded APK list
@@ -24,40 +24,43 @@ jobs:
           key: apk-uploaded-list
           restore-keys: apk-uploaded-list
 
-      # 3️⃣ 上传 APK 文件到 Telegram
+      # 3️⃣ 上传 APK 到 Telegram
       - name: Upload APKs to Telegram
         env:
           BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          # 确保记录文件存在
           touch uploaded_apks.txt
-          cd release_temp/apk || exit 1
+
+          # 进入 APK 所在目录
+          cd release_temp/apk/release || exit 1
 
           for APK_FILE in *.apk; do
-            # 检查是否已上传
+            # 已上传则跳过
             if grep -Fxq "$APK_FILE" ../../uploaded_apks.txt; then
               echo "$APK_FILE 已上传，跳过"
               continue
             fi
 
-            # 获取当前 UTC 时间
+            # 当前 UTC 时间
             TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
 
-            echo "上传 $APK_FILE 到 Telegram..."
+            echo "上传 $APK_FILE ..."
             
-            # 上传文件并添加文件名+时间作为消息
+            # 上传文件 + 带文件名和时间说明
             curl -X POST "$BOT_API_URL" \
                  -F "chat_id=$CHAT_ID" \
                  -F "document=@$APK_FILE" \
-                 -F "caption=文件名: $APK_FILE\n上传时间: $TIMESTAMP"
+                 -F "caption=📦 文件: $APK_FILE\n🕒 上传时间: $TIMESTAMP"
 
             echo "$APK_FILE 上传完成"
 
-            # 记录已上传文件
+            # 记录已上传
             echo "$APK_FILE" >> ../../uploaded_apks.txt
           done
 
-      # 4️⃣ 保存已上传列表到缓存
+      # 4️⃣ 保存上传记录
       - name: Save uploaded APK list
         uses: actions/cache@v3
         with:
