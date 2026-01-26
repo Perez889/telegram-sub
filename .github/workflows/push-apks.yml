@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ 安装 git-lfs（关键）
+      # 1️⃣ 安装 git-lfs
       - name: Install git-lfs
         run: |
           sudo apt-get update
@@ -20,18 +20,21 @@ jobs:
         run: |
           git clone https://github.com/FongMi/Release.git release_temp
           cd release_temp
-          git lfs pull
 
-      # 3️⃣ 校验 APK 是否真的存在（不是指针）
+          # ⚠️ 关键三连（缺一不可）
+          git lfs fetch --all
+          git lfs pull
+          git lfs checkout
+
+      # 3️⃣ 验证 APK 是否是真实二进制
       - name: Verify APK files
         run: |
           cd release_temp/apk/release || exit 1
-          echo "APK 文件列表："
           ls -lh *.apk
-          echo "文件类型："
+          echo "====== 文件类型 ======"
           file *.apk
 
-      # 4️⃣ 上传 APK 到 Telegram
+      # 4️⃣ 上传 APK
       - name: Upload APKs to Telegram
         env:
           BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
@@ -39,13 +42,13 @@ jobs:
         run: |
           cd release_temp/apk/release || exit 1
 
-          for APK_FILE in *.apk; do
-            echo "上传 $APK_FILE ..."
+          for APK in *.apk; do
+            echo "🚀 上传 $APK"
 
-            curl -X POST "$BOT_API_URL" \
+            curl --fail -X POST "$BOT_API_URL" \
               -F "chat_id=$CHAT_ID" \
-              -F "document=@$APK_FILE" \
-              -F "caption=📦 文件: $APK_FILE"
+              -F "document=@$APK" \
+              -F "caption=📦 $APK"
 
-            echo "✅ $APK_FILE 上传完成"
+            echo "✅ $APK 上传完成"
           done
