@@ -1,4 +1,4 @@
-name: Push FongMi APKs to Telegram
+name: APK to Telegram
 
 on:
   workflow_dispatch:
@@ -8,12 +8,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Clone 主仓库
-      - name: Clone FongMi Release
+      # 1️⃣ 安装 git-lfs（关键）
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+          git lfs install
+
+      # 2️⃣ 克隆仓库
+      - name: Clone FongMi/Release
         run: |
           git clone https://github.com/FongMi/Release.git release_temp
+          cd release_temp
+          git lfs pull
 
-      # 2️⃣ 上传 APK 文件
+      # 3️⃣ 校验 APK 是否真的存在（不是指针）
+      - name: Verify APK files
+        run: |
+          cd release_temp/apk/release || exit 1
+          echo "APK 文件列表："
+          ls -lh *.apk
+          echo "文件类型："
+          file *.apk
+
+      # 4️⃣ 上传 APK 到 Telegram
       - name: Upload APKs to Telegram
         env:
           BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
@@ -21,26 +39,13 @@ jobs:
         run: |
           cd release_temp/apk/release || exit 1
 
-          # 临时记录已上传 APK
-          touch uploaded_apks.txt
-
           for APK_FILE in *.apk; do
-            # 检查是否已上传
-            if grep -Fxq "$APK_FILE" uploaded_apks.txt; then
-              echo "$APK_FILE 已上传，跳过"
-              continue
-            fi
-
-            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
-
             echo "上传 $APK_FILE ..."
 
             curl -X POST "$BOT_API_URL" \
-                 -F "chat_id=$CHAT_ID" \
-                 -F "document=@$APK_FILE" \
-                 -F "caption=📦 文件: $APK_FILE\n🕒 上传时间: $TIMESTAMP"
+              -F "chat_id=$CHAT_ID" \
+              -F "document=@$APK_FILE" \
+              -F "caption=📦 文件: $APK_FILE"
 
-            echo "$APK_FILE 上传完成"
-
-            echo "$APK_FILE" >> uploaded_apks.txt
+            echo "✅ $APK_FILE 上传完成"
           done
