@@ -1,45 +1,42 @@
-name: Debug APK Push
+name: APK to Telegram
 
 on:
   workflow_dispatch:   # 手动触发
+  release:
+    types: [published] # 发布 Release 时也会触发
 
 jobs:
-  debug:
+  send-apk:
     runs-on: ubuntu-latest
     steps:
-      # 第一步：拉取仓库
       - name: Checkout FongMi Release repo
         uses: actions/checkout@v3
         with:
           repository: FongMi/Release
 
-      # 第二步：确认目录结构
-      - name: Show repo structure
+      - name: List APK files
         run: |
-          echo "当前目录: $(pwd)"
-          ls -R apk/release
+          echo "以下是 apk/release 目录里的 APK 文件："
+          ls -l ./apk/release/*.apk
 
-      # 第三步：打印找到的 APK 文件路径
-      - name: Find APK files
-        run: |
-          echo "以下是找到的 APK 文件："
-          find ./apk/release -name "*.apk"
-
-      # 第四步：测试能否发消息到 Telegram
-      - name: Send test message to Telegram
+      - name: Send release note to Telegram
         run: |
           curl -X POST \
             -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -F text="✅ Workflow 已经跑起来了！这是调试消息。" \
+            -F text="📢 新版本 APK 已同步到频道！" \
             ${{ secrets.TELEGRAM_BOT_API_URL }}/sendMessage
 
-      # 第五步：上传一个 APK 文件测试
-      - name: Upload one APK
+      - name: Upload all APKs
         run: |
-          file=$(ls ./apk/release/*.apk | head -n 1)
-          echo "准备上传测试文件: $file"
-          ls -l $file
-          curl -X POST \
-            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -F document=@$file \
-            ${{ secrets.TELEGRAM_BOT_API_URL }}/sendDocument
+          for file in ./apk/release/*.apk; do
+            echo "上传: $file"
+            if [ -f "$file" ]; then
+              curl -X POST \
+                -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+                -F document=@$file \
+                ${{ secrets.TELEGRAM_BOT_API_URL }}/sendDocument \
+                || echo "❌ 上传失败: $file"
+            else
+              echo "❌ 文件不存在: $file"
+            fi
+          done
