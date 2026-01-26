@@ -1,4 +1,4 @@
-name: APK to Telegram
+name: Push FongMi APKs to Telegram
 
 on:
   workflow_dispatch:
@@ -8,44 +8,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ 安装 git-lfs
-      - name: Install git-lfs
+      - name: Download APKs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y git-lfs
-          git lfs install
+          mkdir apks
+          cd apks
 
-      # 2️⃣ 克隆仓库
-      - name: Clone FongMi/Release
-        run: |
-          git clone https://github.com/FongMi/Release.git release_temp
-          cd release_temp
+          curl -L -o leanback-arm64_v8a.apk \
+            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/leanback-arm64_v8a.apk
 
-          # ⚠️ 关键三连（缺一不可）
-          git lfs fetch --all
-          git lfs pull
-          git lfs checkout
+          curl -L -o leanback-armeabi_v7a.apk \
+            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/leanback-armeabi_v7a.apk
 
-      # 3️⃣ 验证 APK 是否是真实二进制
-      - name: Verify APK files
-        run: |
-          cd release_temp/apk/release || exit 1
-          ls -lh *.apk
-          echo "====== 文件类型 ======"
-          file *.apk
+          curl -L -o mobile-arm64_v8a.apk \
+            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/mobile-arm64_v8a.apk
 
-      # 4️⃣ 上传 APK
+          curl -L -o mobile-armeabi_v7a.apk \
+            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/mobile-armeabi_v7a.apk
+
+          ls -lh
+
       - name: Upload APKs to Telegram
         env:
           BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          cd release_temp/apk/release || exit 1
+          cd apks
 
           for APK in *.apk; do
             echo "🚀 上传 $APK"
 
-            curl --fail -X POST "$BOT_API_URL" \
+            curl -X POST "$BOT_API_URL" \
               -F "chat_id=$CHAT_ID" \
               -F "document=@$APK" \
               -F "caption=📦 $APK"
