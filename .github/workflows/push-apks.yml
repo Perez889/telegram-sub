@@ -10,14 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout FongMi/Release 仓库 fongmi/apk 分支
-      - name: Checkout fongmi/apk branch
-        uses: actions/checkout@v3
-        with:
-          repository: FongMi/Release
-          ref: fongmi/apk
-          token: ${{ secrets.GITHUB_TOKEN }}   # 内置 token，用于 checkout
-          fetch-depth: 1
+      # 1️⃣ Clone fongmi/apk 分支（稳定方式）
+      - name: Clone FongMi/Release fongmi/apk branch
+        run: |
+          git clone --single-branch --branch fongmi/apk https://github.com/FongMi/Release.git release_temp
 
       # 2️⃣ 恢复已上传 APK 列表（缓存）
       - name: Restore uploaded APK list
@@ -35,11 +31,11 @@ jobs:
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           touch uploaded_apks.txt
-          cd apk || exit 1
+          cd release_temp/apk || exit 1
 
           for APK_FILE in *.apk; do
             # 检查是否已上传
-            if grep -Fxq "$APK_FILE" ../uploaded_apks.txt; then
+            if grep -Fxq "$APK_FILE" ../../uploaded_apks.txt; then
               echo "$APK_FILE 已上传，跳过"
               continue
             fi
@@ -58,7 +54,7 @@ jobs:
             echo "$APK_FILE 上传完成"
 
             # 记录已上传文件
-            echo "$APK_FILE" >> ../uploaded_apks.txt
+            echo "$APK_FILE" >> ../../uploaded_apks.txt
           done
 
       # 4️⃣ 保存已上传列表到缓存
