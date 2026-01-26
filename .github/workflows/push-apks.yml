@@ -1,5 +1,18 @@
-- name: Debug APK path
-  run: |
-    echo "当前目录: $(pwd)"
-    ls -l ./apk/release
-    find ./apk/release -name "*.apk"
+name: Simple Test
+
+on:
+  workflow_dispatch:   # 手动触发
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout FongMi Release repo
+        uses: actions/checkout@v3
+        with:
+          repository: FongMi/Release
+
+      - name: Show repo structure
+        run: |
+          pwd
+          ls -R apk/release
