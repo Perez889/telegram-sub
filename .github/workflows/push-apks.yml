@@ -1,9 +1,9 @@
-name: Push FongMi APKs to Telegram
+name: APK to Telegram
 
 on:
   workflow_dispatch:   # 手动触发
   schedule:
-    - cron: '0 12 * * *'  # 每天 UTC 12:00
+    - cron: '0 12 * * *'  # 每天 UTC 12:00，可修改
 
 jobs:
   push-apks:
@@ -16,10 +16,10 @@ jobs:
         with:
           repository: FongMi/Release
           ref: fongmi/apk
-          token: ""           # 公开仓库不需要 token
+          token: ${{ secrets.GITHUB_TOKEN }}   # 内置 token，用于 checkout
           fetch-depth: 1
 
-      # 2️⃣ 恢复已上传 APK 列表
+      # 2️⃣ 恢复已上传 APK 列表（缓存）
       - name: Restore uploaded APK list
         id: cache
         uses: actions/cache@v3
@@ -34,13 +34,9 @@ jobs:
           BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # 保证记录文件存在
           touch uploaded_apks.txt
-
-          # 切到 apk 文件夹
           cd apk || exit 1
 
-          # 遍历 apk 文件夹里的 *.apk
           for APK_FILE in *.apk; do
             # 检查是否已上传
             if grep -Fxq "$APK_FILE" ../uploaded_apks.txt; then
@@ -48,10 +44,16 @@ jobs:
               continue
             fi
 
+            # 获取当前 UTC 时间
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+
             echo "上传 $APK_FILE 到 Telegram..."
+            
+            # 上传文件并添加文件名+时间作为消息
             curl -X POST "$BOT_API_URL" \
                  -F "chat_id=$CHAT_ID" \
-                 -F "document=@$APK_FILE"
+                 -F "document=@$APK_FILE" \
+                 -F "caption=文件名: $APK_FILE\n上传时间: $TIMESTAMP"
 
             echo "$APK_FILE 上传完成"
 
