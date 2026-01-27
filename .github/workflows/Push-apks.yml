@@ -51,7 +51,8 @@ jobs:
           update_time=$(date '+%Y/%m/%d %H:%M')
           
           # caption 内容（放在第一个文件上，Telegram 会自动渲染在组底部）
-          caption="影视 · 蜂蜜版\n本次更新：\\n$merged_logs\\n当前版本：$version\\n更新时间：$update_time"
+          # 添加空行让日志更明显在下方
+          caption="影视 · 蜂蜜版\\n\\n本次更新：\\n$merged_logs\\n\\n当前版本：$version\\n更新时间：$update_time"
           
           echo "版本: $version"
           echo "合并日志: $merged_logs"
