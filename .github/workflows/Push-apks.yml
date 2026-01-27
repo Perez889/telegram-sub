@@ -50,9 +50,8 @@ jobs:
           
           update_time=$(date '+%Y/%m/%d %H:%M')
           
-          # caption 内容（放在第一个文件上，Telegram 会自动渲染在组底部）
-          # 添加空行让日志更明显在下方
-          caption="影视 · 蜂蜜版\\n\\n本次更新：\\n$merged_logs\\n\\n当前版本：$version\\n更新时间：$update_time"
+          # caption 内容：开头大量空行强制向下推，放在组底部
+          caption="\\n\\n\\n\\n\\n\\n\\n\\n影视 · 蜂蜜版\\n本次更新：\\n$merged_logs\\n\\n当前版本：$version\\n更新时间：$update_time"
           
           echo "版本: $version"
           echo "合并日志: $merged_logs"
@@ -142,7 +141,7 @@ jobs:
           echo "Telegram 响应: $response"
 
           if echo "$response" | grep -q '"ok":true'; then
-            echo "单个消息推送成功（文件在上，日志在下）"
+            echo "单个消息推送成功（日志在组底部）"
           else
             echo "推送失败 - 检查响应: $response"
           fi
