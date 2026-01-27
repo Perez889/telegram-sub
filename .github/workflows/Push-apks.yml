@@ -35,7 +35,7 @@ jobs:
           echo "已收集的 APK："
           ls -lh apk/
 
-      # 新增：下载并解析 leanback.json 和 mobile.json
+      # 优化：下载并解析 JSON 文件（获取版本和日志，优化合并逻辑）
       - name: 下载并解析 JSON 文件（获取版本和日志）
         run: |
           # 下载 json
@@ -46,22 +46,25 @@ jobs:
           version=$(jq -r '.name' leanback.json)
           if [ -z "$version" ]; then version="未知版本"; fi
           
-          # 解析日志（desc），拆分成行，排序去重合并
-          desc_leanback=$(jq -r '.desc' leanback.json | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
-          desc_mobile=$(jq -r '.desc' mobile.json | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          # 解析日志（desc），拆分成行（去除 * 前缀，排序去重）
+          desc_leanback=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          desc_mobile=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
           
-          # 合并日志（去重）
-          merged_desc=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | tr '\n' '\\n')
+          # 合并日志（去重），然后每行添加 • 前缀，并用 \n 连接
+          merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | sed 's/^/• /g' | tr '\n' '\\n')
           
-          # 构建 caption（包含版本和日志）
-          caption="FongMi APK 更新\n版本: $version\n日志: $merged_desc\nTag: auto-$(date +'%Y%m%d-%H%M')\n来源: FongMi fongmi 分支 APK\n自动同步时间: $(date '+%Y-%m-%d %H:%M HKT')"
+          # 更新时间
+          update_time=$(date '+%Y/%m/%d %H:%M')
+          
+          # 构建 caption（匹配示例格式）
+          caption="- 影视 · 蜂蜜版\\n本次更新：\\n$merged_logs\\n当前版本：$version\\n更新时间：$update_time"
           
           # 输出调试
           echo "版本: $version"
-          echo "合并日志: $merged_desc"
-          echo "完整 Caption: $caption"
+          echo "合并日志 (raw): $merged_logs"
+          echo "完整 Caption (escaped): $caption"
           
-          # 保存到环境变量供后续使用
+          # 保存到环境变量
           echo "caption=$caption" >> $GITHUB_ENV
 
       - name: 计算当前所有 APK 的 hash
@@ -128,11 +131,11 @@ jobs:
 
       - name: 推送到 Telegram（通过 Koyeb 自托管 Bot API，支持大文件上传，四个文件合并发送）
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # 你的 Bot Token：8536915783:AAE-UrQYYlpsUJ4Syho0zSGUMKifTdjRlLU
-          CHAT_ID: ${{ secrets.CHAT_ID }}      # 你的频道 ID，例如 -100xxxxxxxxxx
-          BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app  # 你的 Koyeb 域名
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }} # 你的 Bot Token：8536915783:AAE-UrQYYlpsUJ4Syho0zSGUMKifTdjRlLU
+          CHAT_ID: ${{ secrets.CHAT_ID }} # 你的频道 ID，例如 -100xxxxxxxxxx
+          BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app # 你的 Koyeb 域名
         run: |
-          # 构建 media JSON 数组（四个 APK 文件作为一个组发送）
+          # 构建 media JSON 数组（四个 APK 文件作为一个组发送，caption 只在第一个）
           media='[
             {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
             {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
