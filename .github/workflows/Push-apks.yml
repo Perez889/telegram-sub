@@ -35,6 +35,35 @@ jobs:
           echo "已收集的 APK："
           ls -lh apk/
 
+      # 新增：下载并解析 leanback.json 和 mobile.json
+      - name: 下载并解析 JSON 文件（获取版本和日志）
+        run: |
+          # 下载 json
+          curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
+          curl -s -o mobile.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
+          
+          # 解析版本（假设两个 json 版本相同，如果不同可分别处理）
+          version=$(jq -r '.name' leanback.json)
+          if [ -z "$version" ]; then version="未知版本"; fi
+          
+          # 解析日志（desc），拆分成行，排序去重合并
+          desc_leanback=$(jq -r '.desc' leanback.json | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          desc_mobile=$(jq -r '.desc' mobile.json | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          
+          # 合并日志（去重）
+          merged_desc=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | tr '\n' '\\n')
+          
+          # 构建 caption（包含版本和日志）
+          caption="FongMi APK 更新\n版本: $version\n日志: $merged_desc\nTag: auto-$(date +'%Y%m%d-%H%M')\n来源: FongMi fongmi 分支 APK\n自动同步时间: $(date '+%Y-%m-%d %H:%M HKT')"
+          
+          # 输出调试
+          echo "版本: $version"
+          echo "合并日志: $merged_desc"
+          echo "完整 Caption: $caption"
+          
+          # 保存到环境变量供后续使用
+          echo "caption=$caption" >> $GITHUB_ENV
+
       - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
@@ -97,37 +126,37 @@ jobs:
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
 
-      - name: 推送到 Telegram（通过 Koyeb 自托管 Bot API，支持大文件上传）
+      - name: 推送到 Telegram（通过 Koyeb 自托管 Bot API，支持大文件上传，四个文件合并发送）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # 你的 Bot Token：8536915783:AAE-UrQYYlpsUJ4Syho0zSGUMKifTdjRlLU
           CHAT_ID: ${{ secrets.CHAT_ID }}      # 你的频道 ID，例如 -100xxxxxxxxxx
           BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app  # 你的 Koyeb 域名
         run: |
-          # 循环发送 apk/ 目录下所有 .apk 文件
-          for file in apk/*.apk; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              filesize=$(du -h "$file" | cut -f1)
-              echo "正在上传 $filename (大小: $filesize) 到 Telegram 频道..."
+          # 构建 media JSON 数组（四个 APK 文件作为一个组发送）
+          media='[
+            {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
+            {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
+            {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
+            {"type":"document", "media":"attach://mobile-armeabi_v7a.apk"}
+          ]'
 
-              # 使用自托管 API 发送 document（multipart/form-data 方式，支持大文件）
-              response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendDocument" \
-                -F chat_id="$CHAT_ID" \
-                -F document=@"$file" \
-                -F caption="FongMi APK 更新\n文件名: $filename\n大小: $filesize\nTag: ${{ steps.tag.outputs.tag }}\n来源: FongMi fongmi 分支 APK\n自动同步时间: $(date '+%Y-%m-%d %H:%M HKT')")
+          # 发送 sendMediaGroup（所有文件合并到一个消息组）
+          response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
+            -F chat_id="$CHAT_ID" \
+            -F media="$media" \
+            -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
+            -F "leanback-armeabi_v7a.apk"=@"apk/leanback-armeabi_v7a.apk" \
+            -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
+            -F "mobile-armeabi_v7a.apk"=@"apk/mobile-armeabi_v7a.apk")
 
-              # 输出响应，便于调试
-              echo "Telegram 响应: $response"
+          # 输出响应调试
+          echo "Telegram 响应: $response"
 
-              # 检查是否成功（可选：如果 ok:false 则打印错误）
-              if echo "$response" | grep -q '"ok":true'; then
-                echo "上传成功: $filename"
-              else
-                echo "上传失败: $filename - 检查响应"
-              fi
+          # 检查成功
+          if echo "$response" | grep -q '"ok":true'; then
+            echo "所有 APK 合并发送成功"
+          else
+            echo "发送失败 - 检查响应"
+          fi
 
-              sleep 15  # 间隔，避免 Telegram 频率限制或服务器负载
-            fi
-          done
-
-          echo "所有 APK 推送完成。"
+          echo "推送完成。"
