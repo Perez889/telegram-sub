@@ -130,7 +130,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app
+          BOT_API_BASE: ${{ vars.BOT_API_BASE }}
         run: |
           media='[
             {"type":"document", "media":"attach://leanback-arm64_v8a.apk"},
