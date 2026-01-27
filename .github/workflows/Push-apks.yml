@@ -50,10 +50,9 @@ jobs:
           
           update_time=$(date '+%Y/%m/%d %H:%M')
           
-          # caption 内容（放在第一个文件上，Telegram 会渲染在组底部）
-          caption="影视 · 蜂蜜版\n本次更新：\n$merged_logs\n当前版本：$version\n更新时间：$update_time"
+          # caption 内容（放在第一个文件上，Telegram 会自动渲染在组底部）
+          caption="影视 · 蜂蜜版\n本次更新：\\n$merged_logs\\n当前版本：$version\\n更新时间：$update_time"
           
-          # 输出调试（转义后的 caption）
           echo "版本: $version"
           echo "合并日志: $merged_logs"
           echo "Caption (escaped): $caption"
@@ -124,7 +123,6 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app
         run: |
-          # 构建 media 数组：caption 只放第一个文件（Telegram 会渲染在整个组底部）
           media='[
             {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
             {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
@@ -145,7 +143,7 @@ jobs:
           if echo "$response" | grep -q '"ok":true'; then
             echo "单个消息推送成功（文件在上，日志在下）"
           else
-            echo "推送失败 - 检查响应"
+            echo "推送失败 - 检查响应: $response"
           fi
 
           echo "推送完成。"
