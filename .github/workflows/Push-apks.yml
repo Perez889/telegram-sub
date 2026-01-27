@@ -35,37 +35,29 @@ jobs:
           echo "已收集的 APK："
           ls -lh apk/
 
-      # 优化：下载并解析 JSON 文件（获取版本和日志，优化合并逻辑）
       - name: 下载并解析 JSON 文件（获取版本和日志）
         run: |
-          # 下载 json
           curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
           curl -s -o mobile.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
           
-          # 解析版本（假设两个 json 版本相同，如果不同可分别处理）
           version=$(jq -r '.name' leanback.json)
           if [ -z "$version" ]; then version="未知版本"; fi
           
-          # 解析日志（desc），拆分成行（去除 * 前缀，排序去重）
           desc_leanback=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
           desc_mobile=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
           
-          # 合并日志（去重），然后每行添加 • 前缀，并用 \n 连接
           merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | sed 's/^/• /g' | tr '\n' '\\n')
           
-          # 更新时间
           update_time=$(date '+%Y/%m/%d %H:%M')
           
-          # 构建 caption（匹配示例格式）
-          caption="- 影视 · 蜂蜜版\\n本次更新：\\n$merged_logs\\n当前版本：$version\\n更新时间：$update_time"
+          # 日志文本（用于独立消息）
+          log_message="- 影视 · 蜂蜜版\n本次更新：\n$merged_logs\n当前版本：$version\n更新时间：$update_time"
           
-          # 输出调试
-          echo "版本: $version"
-          echo "合并日志 (raw): $merged_logs"
-          echo "完整 Caption (escaped): $caption"
+          # 简单 caption 用于文件组（可选）
+          group_caption="FongMi APK 更新 - 蜂蜜版 $version"
           
-          # 保存到环境变量
-          echo "caption=$caption" >> $GITHUB_ENV
+          echo "log_message=$log_message" >> $GITHUB_ENV
+          echo "group_caption=$group_caption" >> $GITHUB_ENV
 
       - name: 计算当前所有 APK 的 hash
         id: hash
@@ -76,24 +68,20 @@ jobs:
             hash="no-apk-$(date +%s)"
           fi
           echo "hash=$hash" >> $GITHUB_OUTPUT
-          echo "当前 hash: $hash"
 
       - name: 读取上一次 hash
         id: last
         run: |
           last=$(cat last_hash.txt 2>/dev/null || echo "")
           echo "last=$last" >> $GITHUB_OUTPUT
-          echo "上次 hash: $last"
 
       - name: 判断是否有更新
         id: check
         run: |
           if [ "${{ steps.hash.outputs.hash }}" = "${{ steps.last.outputs.last }}" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "没有变化，退出。"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "有更新，继续。"
           fi
 
       - name: 无变化则直接结束
@@ -122,29 +110,27 @@ jobs:
         run: |
           git tag "${{ steps.tag.outputs.tag }}" || true
           git push origin "${{ steps.tag.outputs.tag }}"
-
           gh release create "${{ steps.tag.outputs.tag }}" \
             apk/*.apk \
             --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
 
-      - name: 推送到 Telegram（通过 Koyeb 自托管 Bot API，支持大文件上传，四个文件合并发送）
+      - name: 推送到 Telegram（文件组 + 独立日志消息，实现日志在下方）
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }} # 你的 Bot Token：8536915783:AAE-UrQYYlpsUJ4Syho0zSGUMKifTdjRlLU
-          CHAT_ID: ${{ secrets.CHAT_ID }} # 你的频道 ID，例如 -100xxxxxxxxxx
-          BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app # 你的 Koyeb 域名
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app
         run: |
-          # 构建 media JSON 数组（四个 APK 文件作为一个组发送，caption 只在第一个）
+          # 第一步：发送媒体组（文件），caption 简单或空
           media='[
-            {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
+            {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.group_caption }}"},
             {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
             {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
             {"type":"document", "media":"attach://mobile-armeabi_v7a.apk"}
           ]'
 
-          # 发送 sendMediaGroup（所有文件合并到一个消息组）
-          response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
+          group_response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
             -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
@@ -152,14 +138,14 @@ jobs:
             -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
             -F "mobile-armeabi_v7a.apk"=@"apk/mobile-armeabi_v7a.apk")
 
-          # 输出响应调试
-          echo "Telegram 响应: $response"
+          echo "媒体组响应: $group_response"
 
-          # 检查成功
-          if echo "$response" | grep -q '"ok":true'; then
-            echo "所有 APK 合并发送成功"
-          else
-            echo "发送失败 - 检查响应"
-          fi
+          # 第二步：发送独立日志消息（放在文件组下方）
+          log_response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMessage" \
+            -d chat_id="$CHAT_ID" \
+            -d text="${{ env.log_message }}" \
+            -d parse_mode="Markdown")
+
+          echo "日志消息响应: $log_response"
 
           echo "推送完成。"
