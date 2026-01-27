@@ -84,50 +84,50 @@ jobs:
           tag="auto-$(date +'%Y%m%d-%H%M')"
           echo "tag=$tag" >> $GITHUB_OUTPUT
 
-      # ──────────────── 使用 gh CLI 创建 tag + Release + 上传 APK ────────────────
       - name: 创建 GitHub Release 并上传所有 APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 先创建并推送 tag（如果已存在不会报错）
           git tag "${{ steps.tag.outputs.tag }}" || true
           git push origin "${{ steps.tag.outputs.tag }}"
 
-          # 创建 Release 并上传 apk/ 目录下所有 .apk 文件
           gh release create "${{ steps.tag.outputs.tag }}" \
             apk/*.apk \
             --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
 
-      - name: 推送到 Telegram（带调试输出）
+      - name: 推送到 Telegram（通过 Koyeb 自托管 Bot API，支持大文件上传）
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # 你的 Bot Token：8536915783:AAE-UrQYYlpsUJ4Syho0zSGUMKifTdjRlLU
+          CHAT_ID: ${{ secrets.CHAT_ID }}      # 你的频道 ID，例如 -100xxxxxxxxxx
+          BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app  # 你的 Koyeb 域名
         run: |
-          api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
-          # 使用 GH_TOKEN 认证，更稳定
-          release_json=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api")
-          urls=$(echo "$release_json" | jq -r '.assets[].browser_download_url // empty')
+          # 循环发送 apk/ 目录下所有 .apk 文件
+          for file in apk/*.apk; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              filesize=$(du -h "$file" | cut -f1)
+              echo "正在上传 $filename (大小: $filesize) 到 Telegram 频道..."
 
-          echo "=== 调试信息 ==="
-          echo "最新 Release JSON（简化）："
-          echo "$release_json" | jq '{tag_name, name, assets_count: (.assets | length), assets_names: (.assets[].name)}'
-          echo ""
-          echo "提取到的下载链接（如果为空则说明 assets 没上传成功）："
-          echo "$urls"
-          echo "================"
+              # 使用自托管 API 发送 document（multipart/form-data 方式，支持大文件）
+              response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendDocument" \
+                -F chat_id="$CHAT_ID" \
+                -F document=@"$file" \
+                -F caption="FongMi APK 更新\n文件名: $filename\n大小: $filesize\nTag: ${{ steps.tag.outputs.tag }}\n来源: FongMi fongmi 分支 APK\n自动同步时间: $(date '+%Y-%m-%d %H:%M HKT')")
 
-          if [ -z "$urls" ]; then
-            echo "❌ 没有找到任何 assets 下载链接，上传失败或 Release 为空"
-            exit 1
-          fi
+              # 输出响应，便于调试
+              echo "Telegram 响应: $response"
 
-          for url in $urls; do
-            echo "推送文件到 Telegram: $url"
-            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
-              -d chat_id="$CHAT_ID" \
-              -d document="$url" \
-              -d caption="FongMi APK 更新\nTag: ${{ steps.tag.outputs.tag }}\n来源: https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}"
-            sleep 10
+              # 检查是否成功（可选：如果 ok:false 则打印错误）
+              if echo "$response" | grep -q '"ok":true'; then
+                echo "上传成功: $filename"
+              else
+                echo "上传失败: $filename - 检查响应"
+              fi
+
+              sleep 15  # 间隔，避免 Telegram 频率限制或服务器负载
+            fi
           done
+
+          echo "所有 APK 推送完成。"
