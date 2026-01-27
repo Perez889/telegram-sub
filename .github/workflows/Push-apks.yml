@@ -50,14 +50,15 @@ jobs:
           
           update_time=$(date '+%Y/%m/%d %H:%M')
           
-          # 日志文本（用于独立消息）
-          log_message="- 影视 · 蜂蜜版\n本次更新：\n$merged_logs\n当前版本：$version\n更新时间：$update_time"
+          # caption 内容（放在第一个文件上，Telegram 会渲染在组底部）
+          caption="影视 · 蜂蜜版\n本次更新：\n$merged_logs\n当前版本：$version\n更新时间：$update_time"
           
-          # 简单 caption 用于文件组（可选）
-          group_caption="FongMi APK 更新 - 蜂蜜版 $version"
+          # 输出调试（转义后的 caption）
+          echo "版本: $version"
+          echo "合并日志: $merged_logs"
+          echo "Caption (escaped): $caption"
           
-          echo "log_message=$log_message" >> $GITHUB_ENV
-          echo "group_caption=$group_caption" >> $GITHUB_ENV
+          echo "caption=$caption" >> $GITHUB_ENV
 
       - name: 计算当前所有 APK 的 hash
         id: hash
@@ -110,27 +111,28 @@ jobs:
         run: |
           git tag "${{ steps.tag.outputs.tag }}" || true
           git push origin "${{ steps.tag.outputs.tag }}"
+
           gh release create "${{ steps.tag.outputs.tag }}" \
             apk/*.apk \
             --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
 
-      - name: 推送到 Telegram（文件组 + 独立日志消息，实现日志在下方）
+      - name: 推送到 Telegram（单个消息：文件在上，日志在下）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app
         run: |
-          # 第一步：发送媒体组（文件），caption 简单或空
+          # 构建 media 数组：caption 只放第一个文件（Telegram 会渲染在整个组底部）
           media='[
-            {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.group_caption }}"},
+            {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
             {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
             {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
             {"type":"document", "media":"attach://mobile-armeabi_v7a.apk"}
           ]'
 
-          group_response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
+          response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
             -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
@@ -138,14 +140,12 @@ jobs:
             -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
             -F "mobile-armeabi_v7a.apk"=@"apk/mobile-armeabi_v7a.apk")
 
-          echo "媒体组响应: $group_response"
+          echo "Telegram 响应: $response"
 
-          # 第二步：发送独立日志消息（放在文件组下方）
-          log_response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMessage" \
-            -d chat_id="$CHAT_ID" \
-            -d text="${{ env.log_message }}" \
-            -d parse_mode="Markdown")
-
-          echo "日志消息响应: $log_response"
+          if echo "$response" | grep -q '"ok":true'; then
+            echo "单个消息推送成功（文件在上，日志在下）"
+          else
+            echo "推送失败 - 检查响应"
+          fi
 
           echo "推送完成。"
