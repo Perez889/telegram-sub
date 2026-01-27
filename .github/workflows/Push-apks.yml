@@ -1,0 +1,70 @@
+name: Sync FongMi APK & Push Telegram
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Fetch APK list from GitHub API
+        run: |
+          mkdir apk
+          api="https://api.github.com/repos/FongMi/Release/contents/apk?ref=fongmi"
+
+          curl -s "$api" \
+            | jq -r '.[] | select(.name | endswith(".apk")) | .download_url' \
+            > apk_urls.txt
+
+          echo "Found APKs:"
+          cat apk_urls.txt
+
+      - name: Download APKs
+        run: |
+          while read url; do
+            name=$(basename "$url")
+            echo "Downloading $name"
+            curl -L --fail -o "apk/$name" "$url"
+          done < apk_urls.txt
+
+      - name: Generate tag
+        id: tag
+        run: |
+          tag="auto-$(date +'%Y%m%d-%H%M')"
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: FongMi APK ${{ steps.tag.outputs.tag }}
+          body: |
+            自动同步自：
+            https://github.com/FongMi/Release/tree/fongmi/apk
+          files: apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          urls=$(curl -s "$api" | jq -r '.assets[].browser_download_url')
+
+          for url in $urls; do
+            echo "Sending $url"
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+              -d chat_id="$CHAT_ID" \
+              -d document="$url"
+            sleep 6
+          done
