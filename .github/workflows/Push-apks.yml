@@ -2,7 +2,7 @@ name: Sync FongMi APK & Push Telegram (Stable)
 
 on:
   schedule:
-    - cron: "0 */6 * * *" # 每 6 小时
+    - cron: "0 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout 仓库
+      - name: Checkout 仓库代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 安装依赖
+      - name: 安装必要工具
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip jq coreutils opencc
@@ -28,21 +28,21 @@ jobs:
           curl -L -o fongmi.zip https://codeload.github.com/FongMi/Release/zip/refs/heads/fongmi
           unzip -q fongmi.zip
 
-      - name: 收集 APK
+      - name: 收集 APK 文件
         run: |
           mkdir -p apk
           find Release-fongmi/apk -type f -name "*.apk" -exec cp {} apk/ \;
-          echo "已收集 APK："
+          echo "已收集的 APK："
           ls -lh apk/
 
-      - name: 解析 JSON + 合并日志（简体 + 北京时间）
+      - name: 下载并解析 JSON 文件（获取版本和日志）
         run: |
           curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
           curl -s -o mobile.json   https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
 
           version=$(jq -r '.name // "未知版本"' leanback.json)
 
-          # 合并 desc → 去重
+          # 合并 desc，逐条读取，去符号
           jq -r '.desc[]?' leanback.json mobile.json \
             | sed 's/^[*•-]\s*//' \
             | sort -u > logs_raw.txt
@@ -50,9 +50,10 @@ jobs:
           # 繁体转简体
           opencc -i logs_raw.txt -o logs_cn.txt -c t2s.json
 
-          # 加 •
+          # 每条加 •，保留真实换行
           logs=$(sed 's/^/• /' logs_cn.txt)
 
+          # 北京时间
           update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
 
           caption=$(cat <<EOF
@@ -70,25 +71,26 @@ EOF
           echo "$caption" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          echo "====== Telegram Caption ======"
+          echo "====== Caption 预览 ======"
           echo "$caption"
 
-      - name: 计算 APK hash
+      - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
-          hash=$(find apk -type f -name "*.apk" -print0 \
-            | sort -z \
-            | xargs -0 sha256sum \
-            | sha256sum | cut -d' ' -f1)
+          if ls apk/*.apk >/dev/null 2>&1; then
+            hash=$(find apk -type f -name "*.apk" -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          else
+            hash="no-apk-$(date +%s)"
+          fi
           echo "hash=$hash" >> $GITHUB_OUTPUT
 
-      - name: 读取上次 hash
+      - name: 读取上一次 hash
         id: last
         run: |
           last=$(cat last_hash.txt 2>/dev/null || echo "")
           echo "last=$last" >> $GITHUB_OUTPUT
 
-      - name: 判断是否变化
+      - name: 判断是否有更新
         id: check
         run: |
           if [ "${{ steps.hash.outputs.hash }}" = "${{ steps.last.outputs.last }}" ]; then
@@ -97,32 +99,38 @@ EOF
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: 无变化则退出
+      - name: 无变化则直接结束
         if: steps.check.outputs.changed == 'false'
         run: exit 0
 
-      - name: 保存新 hash
+      - name: 保存新 hash 并提交到仓库
         run: |
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_hash.txt
-          git commit -m "chore: update last_hash" || true
-          git push
+          git commit -m "chore: update last_hash for FongMi sync" || true
+          git push origin HEAD:${{ github.ref_name }}
 
-      - name: 创建 Release
+      - name: 生成 release tag
+        id: tag
+        run: |
+          tag="auto-$(date +'%Y%m%d-%H%M')"
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: 创建 GitHub Release 并上传所有 APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="auto-$(date +'%Y%m%d-%H%M')"
-          git tag "$tag" || true
-          git push origin "$tag"
+          git tag "${{ steps.tag.outputs.tag }}" || true
+          git push origin "${{ steps.tag.outputs.tag }}"
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            apk/*.apk \
+            --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
+            --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
+            || echo "Release 可能已存在，继续处理"
 
-          gh release create "$tag" apk/*.apk \
-            --title "FongMi APK $tag" \
-            --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk"
-
-      - name: 推送 Telegram（4 APK + 日志同一条）
+      - name: 推送到 Telegram（4 文件 + 日志同一条）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -149,4 +157,4 @@ EOF
           )
 
           echo "Telegram 响应："
-          echo "$response" | jq .
+          echo "$response"
