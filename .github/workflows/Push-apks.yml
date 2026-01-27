@@ -13,7 +13,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: 安装必要工具
+      - name: 安装必要工具（含 opencc 用于繁转简）
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip jq coreutils opencc
@@ -36,21 +36,21 @@ jobs:
           version=$(jq -r '.name' leanback.json)
           if [ -z "$version" ]; then version="未知版本"; fi
          
-          # 原始日志，去掉 * 前缀，繁转简
+          # 原始日志，去掉 * 前缀 + 繁转简
           desc_leanback_raw=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | opencc -c t2s)
           desc_mobile_raw=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | opencc -c t2s)
          
-          # 每行加 • 前缀，并保留换行
+          # 每行加 • 前缀，去空行 + 去重 + 排序
           desc_leanback_lines=$(echo "$desc_leanback_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
           desc_mobile_lines=$(echo "$desc_mobile_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
          
-          # 合并日志，保留真实换行
+          # 合并日志，保留真实换行 \n
           merged_logs=$(echo -e "$desc_leanback_lines\n$desc_mobile_lines" | sort | uniq)
          
-          # 中国时间
+          # 北京时间（CST, UTC+8）
           update_time=$(TZ='Asia/Shanghai' date '+%Y/%m/%d %H:%M')
          
-          # caption 格式（使用真实 \n 换行）
+          # caption 格式（使用真实换行 \n）
           caption="- 影视 · 蜂蜜版\n- 本次更新：\n$merged_logs\n- 当前版本：$version\n- 更新时间：$update_time"
          
           echo "版本: $version"
