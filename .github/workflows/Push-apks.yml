@@ -2,7 +2,7 @@ name: Sync FongMi APK & Push Telegram (Stable)
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */6 * * *"   # 每6小时检查一次
   workflow_dispatch:
 
 permissions:
@@ -11,7 +11,6 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout 仓库代码
         uses: actions/checkout@v4
@@ -21,11 +20,12 @@ jobs:
       - name: 安装必要工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip jq coreutils opencc
+          sudo apt-get install -y unzip jq coreutils
 
       - name: 下载 FongMi fongmi 分支 ZIP
         run: |
-          curl -L -o fongmi.zip https://codeload.github.com/FongMi/Release/zip/refs/heads/fongmi
+          curl -L -o fongmi.zip \
+            https://codeload.github.com/FongMi/Release/zip/refs/heads/fongmi
           unzip -q fongmi.zip
 
       - name: 收集 APK 文件
@@ -38,41 +38,25 @@ jobs:
       - name: 下载并解析 JSON 文件（获取版本和日志）
         run: |
           curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
-          curl -s -o mobile.json   https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
-
-          version=$(jq -r '.name // "未知版本"' leanback.json)
-
-          # 合并 desc，逐条读取，去符号
-          jq -r '.desc[]?' leanback.json mobile.json \
-            | sed 's/^[*•-]\s*//' \
-            | sort -u > logs_raw.txt
-
-          # 繁体转简体
-          opencc -i logs_raw.txt -o logs_cn.txt -c t2s.json
-
-          # 每条加 •，保留真实换行
-          logs=$(sed 's/^/• /' logs_cn.txt)
-
-          # 北京时间
-          update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
-
-          caption=$(cat <<EOF
-- 影视 · 蜂蜜版
-
-- 本次更新：
-$logs
-
-当前版本：$version
-更新时间：$update_time
-EOF
-)
-
-          echo "caption<<EOF" >> $GITHUB_ENV
-          echo "$caption" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-          echo "====== Caption 预览 ======"
-          echo "$caption"
+          curl -s -o mobile.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
+          
+          version=$(jq -r '.name' leanback.json)
+          if [ -z "$version" ]; then version="未知版本"; fi
+          
+          desc_leanback=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          desc_mobile=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          
+          merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | sed 's/^/• /g' | tr '\n' '\\n')
+          
+          update_time=$(date '+%Y/%m/%d %H:%M')
+          
+          caption=" - 影视 · 蜂蜜版\\n本次更新：\\n$merged_logs\\n\\n当前版本：$version\\n更新时间：$update_time"
+          
+          echo "版本: $version"
+          echo "合并日志: $merged_logs"
+          echo "Caption (escaped): $caption"
+          
+          echo "caption=$caption" >> $GITHUB_ENV
 
       - name: 计算当前所有 APK 的 hash
         id: hash
@@ -105,11 +89,12 @@ EOF
 
       - name: 保存新 hash 并提交到仓库
         run: |
+          cd "$GITHUB_WORKSPACE"
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_hash.txt
-          git commit -m "chore: update last_hash for FongMi sync" || true
+          git commit -m "chore: update last_hash for FongMi sync" || echo "hash 无变化，无需提交"
           git push origin HEAD:${{ github.ref_name }}
 
       - name: 生成 release tag
@@ -124,37 +109,40 @@ EOF
         run: |
           git tag "${{ steps.tag.outputs.tag }}" || true
           git push origin "${{ steps.tag.outputs.tag }}"
+
           gh release create "${{ steps.tag.outputs.tag }}" \
             apk/*.apk \
             --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
 
-      - name: 推送到 Telegram（4 文件 + 日志同一条）
+      - name: 推送到 Telegram（测试把 caption 放到最后一个文件）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app
         run: |
-          media=$(jq -nc --arg caption "$caption" '[
-            {"type":"document","media":"attach://leanback-arm64_v8a.apk"},
-            {"type":"document","media":"attach://leanback-armeabi_v7a.apk"},
-            {"type":"document","media":"attach://mobile-arm64_v8a.apk"},
-            {
-              "type":"document",
-              "media":"attach://mobile-armeabi_v7a.apk",
-              "caption": $caption
-            }
-          ]')
+          media='[
+            {"type":"document", "media":"attach://leanback-arm64_v8a.apk"},
+            {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
+            {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
+            {"type":"document", "media":"attach://mobile-armeabi_v7a.apk", "caption":"${{ env.caption }}"}
+          ]'
 
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
-            -F "leanback-arm64_v8a.apk=@apk/leanback-arm64_v8a.apk" \
-            -F "leanback-armeabi_v7a.apk=@apk/leanback-armeabi_v7a.apk" \
-            -F "mobile-arm64_v8a.apk=@apk/mobile-arm64_v8a.apk" \
-            -F "mobile-armeabi_v7a.apk=@apk/mobile-armeabi_v7a.apk"
-          )
+            -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
+            -F "leanback-armeabi_v7a.apk"=@"apk/leanback-armeabi_v7a.apk" \
+            -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
+            -F "mobile-armeabi_v7a.apk"=@"apk/mobile-armeabi_v7a.apk")
 
-          echo "Telegram 响应："
-          echo "$response"
+          echo "Telegram 响应: $response"
+
+          if echo "$response" | grep -q '"ok":true'; then
+            echo "单个消息推送完成（caption 已移到最后一个文件）"
+          else
+            echo "推送失败 - 检查响应: $response"
+          fi
+
+          echo "推送完成。"
