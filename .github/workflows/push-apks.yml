@@ -1,27 +1,65 @@
-name: APK to Telegram
+name: Sync FongMi APK & Push Telegram
 
 on:
-  release:
-    types: [published]
+  schedule:
+    - cron: "0 */6 * * *"   # 每 6 小时检查一次
+  workflow_dispatch:
 
 jobs:
-  push:
+  sync:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Send APKs to Telegram
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download APKs from FongMi repo
+        run: |
+          mkdir apk
+          base_url="https://raw.githubusercontent.com/FongMi/Release/fongmi/apk"
+
+          files=(
+            "leanback-armeabi-v7a.apk"
+            "leanback-arm64-v8a.apk"
+            "mobile-armeabi-v7a.apk"
+            "mobile-arm64-v8a.apk"
+          )
+
+          for f in "${files[@]}"; do
+            echo "Downloading $f"
+            curl -L --fail -o "apk/$f" "$base_url/$f"
+          done
+
+      - name: Generate version tag
+        id: tag
+        run: |
+          tag="auto-$(date +'%Y%m%d-%H%M')"
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: FongMi APK ${{ steps.tag.outputs.tag }}
+          body: |
+            自动同步自 FongMi/Release
+            分支：fongmi/apk
+          files: apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push APKs to Telegram
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          RELEASE_JSON: ${{ github.event.release.assets_url }}
         run: |
-          assets=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$RELEASE_JSON")
+          release_api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          urls=$(curl -s "$release_api" | jq -r '.assets[].browser_download_url')
 
-          echo "$assets" | jq -r '.[].browser_download_url' | while read url; do
+          for url in $urls; do
             echo "Sending $url"
-            curl -s \
-              -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
               -d chat_id="$CHAT_ID" \
               -d document="$url"
-            sleep 5
+            sleep 6
           done
