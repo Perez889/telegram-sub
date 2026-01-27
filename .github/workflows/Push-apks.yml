@@ -44,19 +44,19 @@ jobs:
           desc_leanback_lines=$(echo "$desc_leanback_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
           desc_mobile_lines=$(echo "$desc_mobile_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
          
-          # 合并日志，每行用 <br> 分隔
-          merged_logs=$(echo -e "$desc_leanback_lines\n$desc_mobile_lines" | sort | uniq | paste -sd '<br>' -)
+          # 合并日志，使用真实换行 \n
+          merged_logs=$(echo -e "$desc_leanback_lines\n$desc_mobile_lines" | sort | uniq | tr '\n' '\n')
          
           # 中国时间（北京时间）
           update_time=$(TZ='Asia/Shanghai' date '+%Y/%m/%d %H:%M')
          
-          # caption 格式（使用 HTML <br> 强制换行）
-          caption="- 影视 · 蜂蜜版<br>- 本次更新：<br>$merged_logs<br>- 当前版本：$version<br>- 更新时间：$update_time"
+          # caption 格式：精确匹配你想要的效果
+          caption="- 影视 · 蜂蜜版\n- 本次更新：\n$merged_logs- 当前版本：$version\n- 更新时间：$update_time"
          
           echo "版本: $version"
-          echo "合并日志 (简体 + HTML): $merged_logs"
+          echo "合并日志 (简体): $merged_logs"
           echo "更新时间 (CST): $update_time"
-          echo "Caption (HTML): $caption"
+          echo "Caption (raw): $caption"
          
           echo "caption=$caption" >> $GITHUB_ENV
       - name: 计算当前所有 APK 的 hash
@@ -124,7 +124,7 @@ jobs:
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
-            -F parse_mode="HTML" \
+            -F parse_mode="Markdown" \
             -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
             -F "leanback-armeabi_v7a.apk"=@"apk/leanback-armeabi_v7a.apk" \
             -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
