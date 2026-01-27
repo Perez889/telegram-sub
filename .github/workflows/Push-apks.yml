@@ -51,10 +51,11 @@ jobs:
             | sed 's/^/• /g' \
             | opencc -c t2s.json)
           
-          # 设置时区为北京时间 (UTC+8)，但不显示“北京时间”字样
+          # 北京时间
           update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
           
-          caption="\n\n - 影视 · 蜂蜜版\n\n - 本次更新：\n$merged_logs\n\n - 当前版本：$version\n - 更新时间：$update_time"
+          # 格式调整：影视标题前两个换行，后一个换行；“本次更新”前加 -
+          caption="\n\n - 影视 · 蜂蜜版\n\n- 本次更新：\n$merged_logs\n\n当前版本：$version\n更新时间：$update_time"
           
           echo "版本: $version"
           echo -e "合并日志:\n$merged_logs"
@@ -65,6 +66,7 @@ jobs:
             echo "$caption"
             echo "EOF"
           } >> $GITHUB_ENV
+
 
       - name: 计算当前所有 APK 的 hash
         id: hash
