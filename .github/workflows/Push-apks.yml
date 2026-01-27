@@ -1,10 +1,13 @@
 name: Sync FongMi APK & Push Telegram (Stable)
+
 on:
   schedule:
-    - cron: "0 */6 * * *" # 每6小时检查一次
+    - cron: "0 */6 * * *"   # 每6小时检查一次
   workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -13,57 +16,58 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: 安装必要工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip jq coreutils opencc   # 添加 opencc 用于繁转简
+          sudo apt-get install -y unzip jq coreutils opencc
+
       - name: 下载 FongMi fongmi 分支 ZIP
         run: |
           curl -L -o fongmi.zip \
             https://codeload.github.com/FongMi/Release/zip/refs/heads/fongmi
           unzip -q fongmi.zip
+
       - name: 收集 APK 文件
         run: |
           mkdir -p apk
           find Release-fongmi/apk -type f -name "*.apk" -exec cp {} apk/ \;
           echo "已收集的 APK："
           ls -lh apk/
+
       - name: 下载并解析 JSON 文件（获取版本和日志）
         run: |
           curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
           curl -s -o mobile.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
-         
+          
           version=$(jq -r '.name' leanback.json)
           if [ -z "$version" ]; then version="未知版本"; fi
-         
-          # 原始日志，去掉 * 前缀，繁转简
-          desc_leanback_raw=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | opencc -c t2s)
-          desc_mobile_raw=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | opencc -c t2s)
-         
-          # 每行加 • 前缀，并保留换行
-          desc_leanback_lines=$(echo "$desc_leanback_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
-          desc_mobile_lines=$(echo "$desc_mobile_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
-         
-          # 合并日志，使用真实换行 \n
-          merged_logs=$(echo -e "$desc_leanback_lines\n$desc_mobile_lines" | sort | uniq)
-         
+          
+          desc_leanback=$(jq -r '.desc' leanback.json | sed 's/^\* //g')
+          desc_mobile=$(jq -r '.desc' mobile.json | sed 's/^\* //g')
+          
+          merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" \
+            | sort | uniq \
+            | sed 's/^/• /g' \
+            | opencc -c t2s.json)
+          
           # 北京时间
           update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
-         
-          # caption 格式，使用真实换行（避免 GITHUB_ENV 压缩）
-          caption="- 影视 · 蜂蜜版\n- 本次更新：\n$merged_logs\n- 当前版本：$version\n- 更新时间：$update_time"
-         
+          
+          # 格式调整：影视标题前两个换行，后一个换行；“本次更新”前加 -
+          caption="\n\n - 影视 · 蜂蜜版\n\n- 本次更新：\n$merged_logs\n\n当前版本：$version\n更新时间：$update_time"
+          
           echo "版本: $version"
-          echo "合并日志 (简体):\n$merged_logs"
-          echo "更新时间 (CST): $update_time"
-          echo "Caption (raw):\n$caption"
-         
-          # 使用 heredoc 输出 caption，避免换行丢失
-          cat << 'EOF' >> $GITHUB_ENV
-          caption<<END
-          $caption
-          END
-          EOF
+          echo -e "合并日志:\n$merged_logs"
+          echo -e "Caption:\n$caption"
+          
+          {
+            echo "caption<<EOF"
+            echo "$caption"
+            echo "EOF"
+          } >> $GITHUB_ENV
+
+
       - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
@@ -73,11 +77,13 @@ jobs:
             hash="no-apk-$(date +%s)"
           fi
           echo "hash=$hash" >> $GITHUB_OUTPUT
+
       - name: 读取上一次 hash
         id: last
         run: |
           last=$(cat last_hash.txt 2>/dev/null || echo "")
           echo "last=$last" >> $GITHUB_OUTPUT
+
       - name: 判断是否有更新
         id: check
         run: |
@@ -86,9 +92,11 @@ jobs:
           else
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
+
       - name: 无变化则直接结束
         if: steps.check.outputs.changed == 'false'
         run: exit 0
+
       - name: 保存新 hash 并提交到仓库
         run: |
           cd "$GITHUB_WORKSPACE"
@@ -98,22 +106,26 @@ jobs:
           git add last_hash.txt
           git commit -m "chore: update last_hash for FongMi sync" || echo "hash 无变化，无需提交"
           git push origin HEAD:${{ github.ref_name }}
+
       - name: 生成 release tag
         id: tag
         run: |
           tag="auto-$(date +'%Y%m%d-%H%M')"
           echo "tag=$tag" >> $GITHUB_OUTPUT
+
       - name: 创建 GitHub Release 并上传所有 APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git tag "${{ steps.tag.outputs.tag }}" || true
           git push origin "${{ steps.tag.outputs.tag }}"
+
           gh release create "${{ steps.tag.outputs.tag }}" \
             apk/*.apk \
             --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
+
       - name: 推送到 Telegram（测试把 caption 放到最后一个文件）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -126,18 +138,21 @@ jobs:
             {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
             {"type":"document", "media":"attach://mobile-armeabi_v7a.apk", "caption":"${{ env.caption }}"}
           ]'
+
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
-            -F parse_mode="Markdown" \
             -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
             -F "leanback-armeabi_v7a.apk"=@"apk/leanback-armeabi_v7a.apk" \
             -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
             -F "mobile-armeabi_v7a.apk"=@"apk/mobile-armeabi_v7a.apk")
+
           echo "Telegram 响应: $response"
+
           if echo "$response" | grep -q '"ok":true'; then
             echo "单个消息推送完成（caption 已移到最后一个文件）"
           else
             echo "推送失败 - 检查响应: $response"
           fi
+
           echo "推送完成。"
