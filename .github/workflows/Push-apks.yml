@@ -67,6 +67,7 @@ jobs:
             echo "EOF"
           } >> $GITHUB_ENV
 
+
       - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
@@ -125,21 +126,18 @@ jobs:
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
 
-      - name: 推送到 Telegram
+      - name: 推送到 Telegram（测试把 caption 放到最后一个文件）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           BOT_API_BASE: ${{ vars.BOT_API_BASE }}
         run: |
-          media=$(cat <<EOF
-[
-  {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
-  {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
-  {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
-  {"type":"document", "media":"attach://mobile-armeabi_v7a.apk"}
-]
-EOF
-)
+          media='[
+            {"type":"document", "media":"attach://leanback-arm64_v8a.apk"},
+            {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
+            {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
+            {"type":"document", "media":"attach://mobile-armeabi_v7a.apk", "caption":"${{ env.caption }}"}
+          ]'
 
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
@@ -152,7 +150,7 @@ EOF
           echo "Telegram 响应: $response"
 
           if echo "$response" | grep -q '"ok":true'; then
-            echo "推送完成（caption 已放在第一个文件 leanback-arm64_v8a.apk 上）"
+            echo "单个消息推送完成（caption 已移到最后一个文件）"
           else
             echo "推送失败 - 检查响应: $response"
           fi
