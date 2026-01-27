@@ -36,19 +36,20 @@ jobs:
           version=$(jq -r '.name' leanback.json)
           if [ -z "$version" ]; then version="未知版本"; fi
          
-          # 原始繁体日志
+          # 原始日志，繁转简
           desc_leanback_raw=$(jq -r '.desc' leanback.json | sed 's/^\* //g')
           desc_mobile_raw=$(jq -r '.desc' mobile.json | sed 's/^\* //g')
          
-          # 繁转简
-          desc_leanback=$(echo "$desc_leanback_raw" | opencc -c t2s | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
-          desc_mobile=$(echo "$desc_mobile_raw" | opencc -c t2s | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          desc_leanback=$(echo "$desc_leanback_raw" | opencc -c t2s | sed 's/^/• /' | sort | uniq)
+          desc_mobile=$(echo "$desc_mobile_raw" | opencc -c t2s | sed 's/^/• /' | sort | uniq)
          
-          merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | sed 's/^/• /g' | tr '\n' '\\n')
+          # 合并日志，每行后加 \\n，确保换行
+          merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | tr '\n' '\\n')
          
+          # 中国时间
           update_time=$(TZ='Asia/Shanghai' date '+%Y/%m/%d %H:%M')
          
-          # caption 内容：匹配你想要的格式
+          # caption 格式：精确匹配你想要的效果
           caption="- 影视 · 蜂蜜版\\n- 本次更新：\\n$merged_logs- 当前版本：$version\\n- 更新时间：$update_time"
          
           echo "版本: $version"
@@ -122,6 +123,7 @@ jobs:
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
+            -F parse_mode="Markdown" \
             -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
             -F "leanback-armeabi_v7a.apk"=@"apk/leanback-armeabi_v7a.apk" \
             -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
