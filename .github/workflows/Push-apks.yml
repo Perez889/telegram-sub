@@ -16,7 +16,7 @@ jobs:
       - name: 安装必要工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip jq coreutils opencc   # 新增 opencc 用于繁转简
+          sudo apt-get install -y unzip jq coreutils opencc
       - name: 下载 FongMi fongmi 分支 ZIP
         run: |
           curl -L -o fongmi.zip \
@@ -40,17 +40,17 @@ jobs:
           desc_leanback_raw=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | opencc -c t2s)
           desc_mobile_raw=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | opencc -c t2s)
          
-          # 每行加 • 前缀，并用 <br> 连接（避免 sort 后粘连）
+          # 每行加 • 前缀
           desc_leanback_lines=$(echo "$desc_leanback_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
           desc_mobile_lines=$(echo "$desc_mobile_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
          
-          # 合并日志行，用 <br> 连接
+          # 合并日志，每行用 <br> 分隔
           merged_logs=$(echo -e "$desc_leanback_lines\n$desc_mobile_lines" | sort | uniq | paste -sd '<br>' -)
          
-          # 中国时间
+          # 中国时间（北京时间）
           update_time=$(TZ='Asia/Shanghai' date '+%Y/%m/%d %H:%M')
          
-          # caption 格式：使用 HTML <br> 强制换行
+          # caption 格式（使用 HTML <br> 强制换行）
           caption="- 影视 · 蜂蜜版<br>- 本次更新：<br>$merged_logs<br>- 当前版本：$version<br>- 更新时间：$update_time"
          
           echo "版本: $version"
@@ -124,7 +124,7 @@ jobs:
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
-            -F parse_mode="HTML" \   # 关键：HTML 模式处理 <br>
+            -F parse_mode="HTML" \
             -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
             -F "leanback-armeabi_v7a.apk"=@"apk/leanback-armeabi_v7a.apk" \
             -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
