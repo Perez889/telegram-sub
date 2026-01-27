@@ -17,10 +17,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 安装必要工具
+      - name: 安装必要工具（包括 opencc 繁转简）
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip jq coreutils
+          sudo apt-get install -y unzip jq coreutils opencc
 
       - name: 下载 FongMi fongmi 分支 ZIP
         run: |
@@ -35,7 +35,7 @@ jobs:
           echo "已收集的 APK："
           ls -lh apk/
 
-      - name: 下载并解析 JSON 文件（获取版本和日志）
+      - name: 下载并解析 JSON 文件（获取版本和日志，转简体）
         run: |
           curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
           curl -s -o mobile.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
@@ -43,17 +43,26 @@ jobs:
           version=$(jq -r '.name' leanback.json)
           if [ -z "$version" ]; then version="未知版本"; fi
           
-          desc_leanback=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
-          desc_mobile=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          # 原始繁体日志
+          desc_leanback_raw=$(jq -r '.desc' leanback.json | sed 's/^\* //g')
+          desc_mobile_raw=$(jq -r '.desc' mobile.json | sed 's/^\* //g')
           
+          # 繁转简（使用 opencc -i 输入 -c t2s 简体转换）
+          desc_leanback=$(echo "$desc_leanback_raw" | opencc -c t2s | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          desc_mobile=$(echo "$desc_mobile_raw" | opencc -c t2s | tr '\n' '\r' | sed 's/\\n/\n/g' | sort | uniq)
+          
+          # 合并去重 + • 前缀
           merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" | sort | uniq | sed 's/^/• /g' | tr '\n' '\\n')
           
-          update_time=$(date '+%Y/%m/%d %H:%M')
+          # 中国时间
+          update_time=$(TZ='Asia/Shanghai' date '+%Y/%m/%d %H:%M')
           
-          caption="影视 · 蜂蜜版\\n本次更新：\\n$merged_logs\\n\\n当前版本：$version\\n更新时间：$update_time"
+          # caption 格式：加上 - 前缀
+          caption="- 影视 · 蜂蜜版\\n- 本次更新：\\n$merged_logs- 当前版本：$version\\n- 更新时间：$update_time"
           
           echo "版本: $version"
-          echo "合并日志: $merged_logs"
+          echo "合并日志 (简体): $merged_logs"
+          echo "更新时间 (CST): $update_time"
           echo "Caption (escaped): $caption"
           
           echo "caption=$caption" >> $GITHUB_ENV
@@ -116,17 +125,17 @@ jobs:
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，继续处理"
 
-      - name: 推送到 Telegram（测试把 caption 放到最后一个文件）
+      - name: 推送到 Telegram（单个消息：文件在上，日志在下）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           BOT_API_BASE: https://prominent-tootsie-apkrelease-1850e28f.koyeb.app
         run: |
           media='[
-            {"type":"document", "media":"attach://leanback-arm64_v8a.apk"},
+            {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
             {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
             {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
-            {"type":"document", "media":"attach://mobile-armeabi_v7a.apk", "caption":"${{ env.caption }}"}
+            {"type":"document", "media":"attach://mobile-armeabi_v7a.apk"}
           ]'
 
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
@@ -140,7 +149,7 @@ jobs:
           echo "Telegram 响应: $response"
 
           if echo "$response" | grep -q '"ok":true'; then
-            echo "单个消息推送完成（caption 已移到最后一个文件）"
+            echo "单个消息推送成功（日志在组底部）"
           else
             echo "推送失败 - 检查响应: $response"
           fi
