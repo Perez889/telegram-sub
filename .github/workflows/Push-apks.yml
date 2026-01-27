@@ -2,16 +2,21 @@ name: Sync FongMi APK & Push Telegram (Stable)
 
 on:
   schedule:
-    - cron: "0 */6 * * *"  # 每6小时检查一次
+    - cron: "0 */6 * * *"   # 每6小时检查一次
   workflow_dispatch:
 
 permissions:
-  contents: write  # 必须有这个才能创建 release 和 push 回仓库
+  contents: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout 仓库代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: 安装必要工具
         run: |
           sudo apt-get update
@@ -33,7 +38,6 @@ jobs:
       - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
-          # 排序后计算，确保每次顺序一致
           if ls apk/*.apk >/dev/null 2>&1; then
             hash=$(find apk -type f -name "*.apk" -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
           else
@@ -64,16 +68,22 @@ jobs:
         if: steps.check.outputs.changed == 'false'
         run: exit 0
 
-      # ──────────────── 关键修复：在这里提前 commit hash 文件 ────────────────
-      # 此时还在 git 根目录，比较安全
-      - name: 保存新 hash 并提交到仓库
+      # ──────────────── 关键修复步骤 ────────────────
+      - name: 保存新 hash 并提交到仓库（强制 cd 到仓库根目录）
         run: |
+          cd "$GITHUB_WORKSPACE" || { echo "无法 cd 到 $GITHUB_WORKSPACE"; exit 1; }
+          
+          # 调试信息：确认当前目录和 .git 是否存在
+          echo "当前工作目录：$(pwd)"
+          ls -la | grep .git || echo "警告：当前目录下没有找到 .git 文件夹！"
+          
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_hash.txt
           git commit -m "chore: update last_hash for FongMi sync" || echo "hash 无变化，无需提交"
-          git push
+          git push origin HEAD:${{ github.ref_name }}
 
       - name: 生成 release tag
         id: tag
@@ -93,17 +103,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 推送到 Telegram（使用 release 资产链接）
+      - name: 推送到 Telegram
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
-          # 加 Authorization 更稳定
           urls=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api" | jq -r '.assets[].browser_download_url')
 
           if [ -z "$urls" ]; then
-            echo "最新 release 没有资产"
+            echo "最新 release 没有找到资产"
             exit 1
           fi
 
@@ -112,5 +121,5 @@ jobs:
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
               -d chat_id="$CHAT_ID" \
               -d document="$url"
-            sleep 8  # 避免被 Telegram 限频
+            sleep 8
           done
