@@ -5,17 +5,22 @@ on:
     - cron: "0 */6 * * *"   # 每 6 小时检查一次
   workflow_dispatch:
 
+# ⭐ 关键修复点：显式给 Actions 写权限（解决 403）
+permissions:
+  contents: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
 
     steps:
+      # 0️⃣ 基础工具
       - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip jq coreutils
 
-      # 1️⃣ 下载 fongmi 分支（一次性，规避 raw 503）
+      # 1️⃣ 下载 fongmi 分支 ZIP（规避 raw 404 / 503）
       - name: Download FongMi fongmi branch
         run: |
           curl -L -o fongmi.zip \
@@ -31,7 +36,7 @@ jobs:
           echo "Collected APKs:"
           ls -lh apk
 
-      # 3️⃣ 计算 APK hash（用于防重复）
+      # 3️⃣ 计算 APK hash（用于防重复发布）
       - name: Calculate APK hash
         id: hash
         run: |
@@ -39,7 +44,7 @@ jobs:
           echo "hash=$hash" >> $GITHUB_OUTPUT
           echo "Current hash: $hash"
 
-      # 4️⃣ 读取上一次 hash（如果有）
+      # 4️⃣ 读取上一次 hash（如果存在）
       - name: Load last hash
         id: last
         run: |
@@ -51,19 +56,19 @@ jobs:
           echo "last=$last" >> $GITHUB_OUTPUT
           echo "Last hash: $last"
 
-      # 5️⃣ 判断是否有变化
+      # 5️⃣ 判断是否有更新
       - name: Check for update
         id: check
         run: |
           if [ "${{ steps.hash.outputs.hash }}" = "${{ steps.last.outputs.last }}" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No APK change, exit."
+            echo "No APK change detected."
           else
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "APK updated."
           fi
 
-      # 6️⃣ 没变化直接结束（不建 Release、不推 TG）
+      # 6️⃣ 没变化直接退出
       - name: Exit if no change
         if: steps.check.outputs.changed == 'false'
         run: exit 0
@@ -73,14 +78,14 @@ jobs:
         run: |
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
 
-      # 8️⃣ 生成 tag
+      # 8️⃣ 生成 Release tag
       - name: Generate tag
         id: tag
         run: |
           tag="auto-$(date +'%Y%m%d-%H%M')"
           echo "tag=$tag" >> $GITHUB_OUTPUT
 
-      # 9️⃣ 创建 GitHub Release
+      # 9️⃣ 创建 GitHub Release（之前 403 就卡在这里）
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -95,7 +100,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 🔟 推送到 Telegram（URL，不走 50MB）
+      # 🔟 推送到 Telegram（URL 方式，不走 50MB 限制）
       - name: Push to Telegram
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -112,7 +117,7 @@ jobs:
             sleep 6
           done
 
-      # 11️⃣ 提交 hash 文件（用于下次对比）
+      # 11️⃣ 提交 hash 文件，供下次对比
       - name: Commit hash
         run: |
           git config user.name "github-actions"
