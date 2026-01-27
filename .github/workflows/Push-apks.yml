@@ -67,7 +67,6 @@ jobs:
             echo "EOF"
           } >> $GITHUB_ENV
 
-
       - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
@@ -132,12 +131,15 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           BOT_API_BASE: ${{ vars.BOT_API_BASE }}
         run: |
-          media='[
-            {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
-            {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
-            {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
-            {"type":"document", "media":"attach://mobile-armeabi_v7a.apk"}
-          ]'
+          media=$(cat <<EOF
+[
+  {"type":"document", "media":"attach://leanback-arm64_v8a.apk", "caption":"${{ env.caption }}"},
+  {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
+  {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
+  {"type":"document", "media":"attach://mobile-armeabi_v7a.apk"}
+]
+EOF
+)
 
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
@@ -154,6 +156,5 @@ jobs:
           else
             echo "推送失败 - 检查响应: $response"
           fi
-
 
           echo "推送完成。"
