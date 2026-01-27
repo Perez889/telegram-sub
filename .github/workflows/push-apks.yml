@@ -1,46 +1,27 @@
-name: Push FongMi APKs to Telegram
+name: APK to Telegram
 
 on:
-  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
-  push-apks:
+  push:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download APKs
-        run: |
-          mkdir apks
-          cd apks
-
-          curl -L -o leanback-arm64_v8a.apk \
-            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/leanback-arm64_v8a.apk
-
-          curl -L -o leanback-armeabi_v7a.apk \
-            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/leanback-armeabi_v7a.apk
-
-          curl -L -o mobile-arm64_v8a.apk \
-            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/mobile-arm64_v8a.apk
-
-          curl -L -o mobile-armeabi_v7a.apk \
-            https://raw.githubusercontent.com/FongMi/Release/main/apk/release/mobile-armeabi_v7a.apk
-
-          ls -lh
-
-      - name: Upload APKs to Telegram
+      - name: Send APKs to Telegram
         env:
-          BOT_API_URL: ${{ secrets.TELEGRAM_BOT_API_URL }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          RELEASE_JSON: ${{ github.event.release.assets_url }}
         run: |
-          cd apks
+          assets=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$RELEASE_JSON")
 
-          for APK in *.apk; do
-            echo "🚀 上传 $APK"
-
-            curl -X POST "$BOT_API_URL" \
-              -F "chat_id=$CHAT_ID" \
-              -F "document=@$APK" \
-              -F "caption=📦 $APK"
-
-            echo "✅ $APK 上传完成"
+          echo "$assets" | jq -r '.[].browser_download_url' | while read url; do
+            echo "Sending $url"
+            curl -s \
+              -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+              -d chat_id="$CHAT_ID" \
+              -d document="$url"
+            sleep 5
           done
