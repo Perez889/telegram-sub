@@ -139,7 +139,7 @@ jobs:
             {"type":"document", "media":"attach://mobile-armeabi_v7a.apk", "caption":"${{ env.caption }}"}
           ]'
 
-          response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
+          response=$(curl -s -X POST "${BOT_API_BASE}/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
             -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
