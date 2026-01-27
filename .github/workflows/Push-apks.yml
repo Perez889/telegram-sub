@@ -5,54 +5,52 @@ on:
     - cron: "0 */6 * * *"   # 每 6 小时检查一次
   workflow_dispatch:
 
-# ⭐ 关键修复点：显式给 Actions 写权限（解决 403）
+# 显式授予写入权限（解决之前 403 问题）
 permissions:
   contents: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-
     steps:
-      # 0️⃣ 基础工具
+      # 0️⃣ 安装必要工具
       - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip jq coreutils
 
-      # 1️⃣ 下载 fongmi 分支 ZIP（规避 raw 404 / 503）
+      # 1️⃣ 下载 FongMi fongmi 分支的 ZIP 包（绕过 raw 文件限制）
       - name: Download FongMi fongmi branch
         run: |
           curl -L -o fongmi.zip \
             https://codeload.github.com/FongMi/Release/zip/refs/heads/fongmi
           unzip -q fongmi.zip
 
-      # 2️⃣ 收集 APK
+      # 2️⃣ 收集所有 APK 到 apk/ 目录
       - name: Collect APKs
         run: |
           mkdir -p apk
           find Release-fongmi/apk -type f -name "*.apk" -exec cp {} apk/ \;
-
           echo "Collected APKs:"
-          ls -lh apk
+          ls -lh apk/
 
-      # 3️⃣ 计算 APK hash（用于防重复发布）
+      # 3️⃣ 计算当前所有 APK 的统一 hash（防重复发布）
       - name: Calculate APK hash
         id: hash
         run: |
-          hash=$(sha256sum apk/*.apk | sha256sum | cut -d' ' -f1)
+          if ls apk/*.apk >/dev/null 2>&1; then
+            hash=$(find apk -type f -name "*.apk" -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+          else
+            hash="no-apk-found-$(date +%s)"
+          fi
           echo "hash=$hash" >> $GITHUB_OUTPUT
           echo "Current hash: $hash"
 
-      # 4️⃣ 读取上一次 hash（如果存在）
+      # 4️⃣ 读取上一次记录的 hash
       - name: Load last hash
         id: last
         run: |
-          if [ -f last_hash.txt ]; then
-            last=$(cat last_hash.txt)
-          else
-            last=""
-          fi
+          last=$(cat last_hash.txt 2>/dev/null || echo "")
           echo "last=$last" >> $GITHUB_OUTPUT
           echo "Last hash: $last"
 
@@ -62,66 +60,66 @@ jobs:
         run: |
           if [ "${{ steps.hash.outputs.hash }}" = "${{ steps.last.outputs.last }}" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No APK change detected."
+            echo "No APK change detected → exiting."
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "APK updated."
+            echo "APK files changed → proceeding."
           fi
 
-      # 6️⃣ 没变化直接退出
+      # 6️⃣ 如果没变化，直接结束
       - name: Exit if no change
         if: steps.check.outputs.changed == 'false'
         run: exit 0
 
-      # 7️⃣ 保存最新 hash
-      - name: Save new hash
+      # ──── 关键修复：在这里提前保存并提交 hash（此时还在 git 根目录） ────
+      - name: Save and commit new hash
         run: |
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_hash.txt
+          git commit -m "chore: update last_hash for FongMi APK sync" || echo "No changes to commit (hash file already up-to-date)"
+          git push
 
-      # 8️⃣ 生成 Release tag
+      # 7️⃣ 生成 Release tag（时间戳格式）
       - name: Generate tag
         id: tag
         run: |
           tag="auto-$(date +'%Y%m%d-%H%M')"
           echo "tag=$tag" >> $GITHUB_OUTPUT
 
-      # 9️⃣ 创建 GitHub Release（之前 403 就卡在这里）
+      # 8️⃣ 创建 GitHub Release 并上传所有 APK
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: FongMi APK ${{ steps.tag.outputs.tag }}
           body: |
-            自动同步自：
-            https://github.com/FongMi/Release/tree/fongmi/apk
-
-            仅在 APK 发生变化时发布。
+            自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk
+            
+            仅当 APK 文件内容发生变化时才会触发新 Release。
           files: apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 🔟 推送到 Telegram（URL 方式，不走 50MB 限制）
+      # 9️⃣ 推送到 Telegram（使用 Release 资产的下载链接，避免 50MB 限制）
       - name: Push to Telegram
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
-          urls=$(curl -s "$api" | jq -r '.assets[].browser_download_url')
-
+          urls=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api" | jq -r '.assets[].browser_download_url')
+          
+          if [ -z "$urls" ]; then
+            echo "No assets found in latest release."
+            exit 1
+          fi
+          
           for url in $urls; do
-            echo "Sending $url"
+            echo "Sending to Telegram: $url"
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
               -d chat_id="$CHAT_ID" \
               -d document="$url"
-            sleep 6
+            sleep 8   # 避免 Telegram 频率限制
           done
-
-      # 11️⃣ 提交 hash 文件，供下次对比
-      - name: Commit hash
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add last_hash.txt
-          git commit -m "chore: update apk hash" || echo "Nothing to commit"
-          git push
