@@ -40,18 +40,18 @@ jobs:
           desc_leanback_raw=$(jq -r '.desc' leanback.json | sed 's/^\* //g' | opencc -c t2s)
           desc_mobile_raw=$(jq -r '.desc' mobile.json | sed 's/^\* //g' | opencc -c t2s)
          
-          # 每行加 • 前缀
+          # 每行加 • 前缀，并保留换行
           desc_leanback_lines=$(echo "$desc_leanback_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
           desc_mobile_lines=$(echo "$desc_mobile_raw" | sed '/^$/d' | sed 's/^/• /' | sort | uniq)
          
-          # 合并日志，使用真实换行 \n
-          merged_logs=$(echo -e "$desc_leanback_lines\n$desc_mobile_lines" | sort | uniq | tr '\n' '\n')
+          # 合并日志，保留真实换行
+          merged_logs=$(echo -e "$desc_leanback_lines\n$desc_mobile_lines" | sort | uniq)
          
-          # 中国时间（北京时间）
+          # 中国时间
           update_time=$(TZ='Asia/Shanghai' date '+%Y/%m/%d %H:%M')
          
-          # caption 格式：精确匹配你想要的效果
-          caption="- 影视 · 蜂蜜版\n- 本次更新：\n$merged_logs- 当前版本：$version\n- 更新时间：$update_time"
+          # caption 格式（使用真实 \n 换行）
+          caption="- 影视 · 蜂蜜版\n- 本次更新：\n$merged_logs\n- 当前版本：$version\n- 更新时间：$update_time"
          
           echo "版本: $version"
           echo "合并日志 (简体): $merged_logs"
