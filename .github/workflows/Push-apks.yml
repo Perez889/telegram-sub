@@ -68,17 +68,10 @@ jobs:
         if: steps.check.outputs.changed == 'false'
         run: exit 0
 
-      # ──────────────── 关键修复步骤 ────────────────
-      - name: 保存新 hash 并提交到仓库（强制 cd 到仓库根目录）
+      - name: 保存新 hash 并提交到仓库
         run: |
-          cd "$GITHUB_WORKSPACE" || { echo "无法 cd 到 $GITHUB_WORKSPACE"; exit 1; }
-          
-          # 调试信息：确认当前目录和 .git 是否存在
-          echo "当前工作目录：$(pwd)"
-          ls -la | grep .git || echo "警告：当前目录下没有找到 .git 文件夹！"
-          
+          cd "$GITHUB_WORKSPACE"
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
-          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_hash.txt
@@ -91,35 +84,50 @@ jobs:
           tag="auto-$(date +'%Y%m%d-%H%M')"
           echo "tag=$tag" >> $GITHUB_OUTPUT
 
-      - name: 创建 GitHub Release 并上传 APK
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: FongMi APK ${{ steps.tag.outputs.tag }}
-          body: |
-            自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk
-            仅当 APK 内容变化时发布。
-          files: apk/*.apk
+      # ──────────────── 使用 gh CLI 创建 tag + Release + 上传 APK ────────────────
+      - name: 创建 GitHub Release 并上传所有 APK
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 先创建并推送 tag（如果已存在不会报错）
+          git tag "${{ steps.tag.outputs.tag }}" || true
+          git push origin "${{ steps.tag.outputs.tag }}"
 
-      - name: 推送到 Telegram
+          # 创建 Release 并上传 apk/ 目录下所有 .apk 文件
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            apk/*.apk \
+            --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
+            --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
+            || echo "Release 可能已存在，继续处理"
+
+      - name: 推送到 Telegram（带调试输出）
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
-          urls=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api" | jq -r '.assets[].browser_download_url')
+          # 使用 GH_TOKEN 认证，更稳定
+          release_json=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$api")
+          urls=$(echo "$release_json" | jq -r '.assets[].browser_download_url // empty')
+
+          echo "=== 调试信息 ==="
+          echo "最新 Release JSON（简化）："
+          echo "$release_json" | jq '{tag_name, name, assets_count: (.assets | length), assets_names: (.assets[].name)}'
+          echo ""
+          echo "提取到的下载链接（如果为空则说明 assets 没上传成功）："
+          echo "$urls"
+          echo "================"
 
           if [ -z "$urls" ]; then
-            echo "最新 release 没有找到资产"
+            echo "❌ 没有找到任何 assets 下载链接，上传失败或 Release 为空"
             exit 1
           fi
 
           for url in $urls; do
-            echo "推送至 Telegram: $url"
+            echo "推送文件到 Telegram: $url"
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
               -d chat_id="$CHAT_ID" \
-              -d document="$url"
-            sleep 8
+              -d document="$url" \
+              -d caption="FongMi APK 更新\nTag: ${{ steps.tag.outputs.tag }}\n来源: https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}"
+            sleep 10
           done
