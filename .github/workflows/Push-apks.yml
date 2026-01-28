@@ -2,7 +2,7 @@ name: Sync FongMi APK & Push Telegram (Stable)
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # 每6小时检查一次
+    - cron: "0 */6 * * *"    # 每6小时检查一次
   workflow_dispatch:
 
 permissions:
@@ -38,41 +38,45 @@ jobs:
       - name: 下载并解析 JSON 文件（获取版本和日志）
         run: |
           curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
-          curl -s -o mobile.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
-          
+          curl -s -o mobile.json   https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
+
           version=$(jq -r '.name' leanback.json)
-          if [ -z "$version" ]; then version="未知版本"; fi
-          
+          [ -z "$version" ] && version="未知版本"
+
           desc_leanback=$(jq -r '.desc' leanback.json | sed 's/^\* //g')
-          desc_mobile=$(jq -r '.desc' mobile.json | sed 's/^\* //g')
-          
+          desc_mobile=$(jq -r '.desc' mobile.json   | sed 's/^\* //g')
+
           merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" \
             | sort | uniq \
             | sed 's/^/• /g' \
             | opencc -c t2s.json)
-          
+
           # 北京时间
           update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
-          
-          # 格式调整：影视标题前两个换行，后一个换行；“本次更新”前加 -
-          caption="\n\n - 影视 · 蜂蜜版\n\n- 本次更新：\n$merged_logs\n\n - 当前版本：$version\n - 更新时间：$update_time"
-          
+
+          caption=$(
+            printf "\n\n - 影视 · 蜂蜜版\n\n- 本次更新：\n%s\n\n - 当前版本：%s\n - 更新时间：%s" \
+              "$merged_logs" "$version" "$update_time"
+          )
+
           echo "版本: $version"
           echo -e "合并日志:\n$merged_logs"
           echo -e "Caption:\n$caption"
-          
+
           {
             echo "caption<<EOF"
             echo "$caption"
             echo "EOF"
           } >> $GITHUB_ENV
 
-
       - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
           if ls apk/*.apk >/dev/null 2>&1; then
-            hash=$(find apk -type f -name "*.apk" -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+            hash=$(find apk -type f -name "*.apk" -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              | sha256sum | cut -d' ' -f1)
           else
             hash="no-apk-$(date +%s)"
           fi
@@ -89,49 +93,71 @@ jobs:
         run: |
           if [ "${{ steps.hash.outputs.hash }}" = "${{ steps.last.outputs.last }}" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No change detected → skipping push / release"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Change detected → will create release & push to Telegram"
           fi
 
-      - name: 无变化则直接结束
-        if: steps.check.outputs.changed == 'false'
-        run: exit 0
+      # ────────────────────────────────────────────────
+      # 以下所有步骤只有 changed=true 时才会执行
+      # ────────────────────────────────────────────────
 
       - name: 保存新 hash 并提交到仓库
+        if: steps.check.outputs.changed == 'true'
         run: |
           cd "$GITHUB_WORKSPACE"
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_hash.txt
-          git commit -m "chore: update last_hash for FongMi sync" || echo "hash 无变化，无需提交"
-          git push origin HEAD:${{ github.ref_name }}
+          if git diff --staged --quiet; then
+            echo "No change in last_hash.txt, skip commit"
+          else
+            git commit -m "chore: update last_hash for FongMi sync (new APK(s))"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
 
       - name: 生成 release tag
+        if: steps.check.outputs.changed == 'true'
         id: tag
         run: |
           tag="auto-$(date +'%Y%m%d-%H%M')"
           echo "tag=$tag" >> $GITHUB_OUTPUT
 
       - name: 创建 GitHub Release 并上传所有 APK
+        if: steps.check.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git tag "${{ steps.tag.outputs.tag }}" || true
-          git push origin "${{ steps.tag.outputs.tag }}"
+          git push origin "${{ steps.tag.outputs.tag }}" || true
 
           gh release create "${{ steps.tag.outputs.tag }}" \
             apk/*.apk \
             --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
-            || echo "Release 可能已存在，继续处理"
+            || echo "Release 可能已存在，跳过创建"
 
-      - name: 推送到 Telegram（测试把 caption 放到最后一个文件）
+      - name: 推送到 Telegram（caption 放到最后一个文件）
+        if: steps.check.outputs.changed == 'true'
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          BOT_TOKEN:   ${{ secrets.BOT_TOKEN }}
+          CHAT_ID:     ${{ secrets.CHAT_ID }}
           BOT_API_BASE: ${{ secrets.BOT_API_BASE }}
         run: |
+          # 防御性检查：确保四个 APK 都存在
+          for f in \
+            "leanback-arm64_v8a.apk" \
+            "leanback-armeabi_v7a.apk" \
+            "mobile-arm64_v8a.apk" \
+            "mobile-armeabi_v7a.apk"; do
+            if [ ! -f "apk/$f" ]; then
+              echo "错误：缺少文件 apk/$f，无法推送 Telegram"
+              exit 1
+            fi
+          done
+
           media='[
             {"type":"document", "media":"attach://leanback-arm64_v8a.apk"},
             {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
@@ -142,17 +168,16 @@ jobs:
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
             -F media="$media" \
-            -F "leanback-arm64_v8a.apk"=@"apk/leanback-arm64_v8a.apk" \
-            -F "leanback-armeabi_v7a.apk"=@"apk/leanback-armeabi_v7a.apk" \
-            -F "mobile-arm64_v8a.apk"=@"apk/mobile-arm64_v8a.apk" \
-            -F "mobile-armeabi_v7a.apk"=@"apk/mobile-armeabi_v7a.apk")
+            -F "leanback-arm64_v8a.apk=@apk/leanback-arm64_v8a.apk" \
+            -F "leanback-armeabi_v7a.apk=@apk/leanback-armeabi_v7a.apk" \
+            -F "mobile-arm64_v8a.apk=@apk/mobile-arm64_v8a.apk" \
+            -F "mobile-armeabi_v7a.apk=@apk/mobile-armeabi_v7a.apk")
 
           echo "Telegram 响应: $response"
 
           if echo "$response" | grep -q '"ok":true'; then
-            echo "单个消息推送完成（caption 已移到最后一个文件）"
+            echo "Telegram 推送成功"
           else
-            echo "推送失败 - 检查响应: $response"
+            echo "Telegram 推送失败，请检查响应内容"
+            exit 1   # 可选：让 workflow 标记为失败
           fi
-
-          echo "推送完成。"
