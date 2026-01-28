@@ -1,8 +1,8 @@
 name: Sync FongMi APK & Push Telegram (Stable)
 
 on:
-  schedule:
-    - cron: "0 */6 * * *"    # 每6小时检查一次
+  #schedule:
+    #- cron: "0 */6 * * *"    # 每6小时检查一次
   workflow_dispatch:
 
 permissions:
