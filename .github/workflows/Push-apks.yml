@@ -2,7 +2,7 @@ name: Sync FongMi APK & Push Telegram (Stable)
 
 on:
   #schedule:
-    #- cron: "0 */6 * * *"    # 每6小时检查一次
+    #- cron: "0 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -51,17 +51,12 @@ jobs:
             | sed 's/^/• /g' \
             | opencc -c t2s.json)
 
-          # 北京时间
           update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
 
           caption=$(
             printf "\n\n - 影视 · 蜂蜜版\n\n- 本次更新：\n%s\n\n - 当前版本：%s\n - 更新时间：%s" \
               "$merged_logs" "$version" "$update_time"
           )
-
-          echo "版本: $version"
-          echo -e "合并日志:\n$merged_logs"
-          echo -e "Caption:\n$caption"
 
           {
             echo "caption<<EOF"
@@ -99,14 +94,9 @@ jobs:
             echo "Change detected → will create release & push to Telegram"
           fi
 
-      # ────────────────────────────────────────────────
-      # 以下所有步骤只有 changed=true 时才会执行
-      # ────────────────────────────────────────────────
-
       - name: 保存新 hash 并提交到仓库
         if: steps.check.outputs.changed == 'true'
         run: |
-          cd "$GITHUB_WORKSPACE"
           echo "${{ steps.hash.outputs.hash }}" > last_hash.txt
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -139,14 +129,13 @@ jobs:
             --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，跳过创建"
 
-      - name: 推送到 Telegram（caption 放到最后一个文件）
+      - name: 推送到 Telegram（使用 jq 构造 JSON）
         if: steps.check.outputs.changed == 'true'
         env:
           BOT_TOKEN:   ${{ secrets.BOT_TOKEN }}
           CHAT_ID:     ${{ secrets.CHAT_ID }}
           BOT_API_BASE: ${{ secrets.BOT_API_BASE }}
         run: |
-          # 防御性检查：确保四个 APK 都存在
           for f in \
             "leanback-arm64_v8a.apk" \
             "leanback-armeabi_v7a.apk" \
@@ -158,12 +147,14 @@ jobs:
             fi
           done
 
-          media='[
-            {"type":"document", "media":"attach://leanback-arm64_v8a.apk"},
-            {"type":"document", "media":"attach://leanback-armeabi_v7a.apk"},
-            {"type":"document", "media":"attach://mobile-arm64_v8a.apk"},
-            {"type":"document", "media":"attach://mobile-armeabi_v7a.apk", "caption":"${{ env.caption }}"}
-          ]'
+          media=$(jq -n --arg cap "${{ env.caption }}" '
+            [
+              {"type":"document","media":"attach://leanback-arm64_v8a.apk"},
+              {"type":"document","media":"attach://leanback-armeabi_v7a.apk"},
+              {"type":"document","media":"attach://mobile-arm64_v8a.apk"},
+              {"type":"document","media":"attach://mobile-armeabi_v7a.apk","caption":$cap}
+            ]
+          ')
 
           response=$(curl -s -X POST "$BOT_API_BASE/bot$BOT_TOKEN/sendMediaGroup" \
             -F chat_id="$CHAT_ID" \
@@ -179,5 +170,5 @@ jobs:
             echo "Telegram 推送成功"
           else
             echo "Telegram 推送失败，请检查响应内容"
-            exit 1   # 可选：让 workflow 标记为失败
+            exit 1
           fi
