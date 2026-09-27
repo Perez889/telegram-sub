@@ -2,7 +2,7 @@ name: Sync FongMi APK & Push Telegram (Stable)
 
 on:
   #schedule:
-    #- cron: "0 */6 * * *"
+  #  - cron: "0 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -20,42 +20,39 @@ jobs:
       - name: 安装必要工具
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip jq coreutils opencc
+          sudo apt-get install -y jq coreutils opencc
 
-      - name: 下载 FongMi fongmi 分支 ZIP
+      # ========== 核心改动：从 Releases API 获取最新版本 ==========
+      - name: 获取最新 GitHub Release 信息
+        id: release
         run: |
-          curl -L -o fongmi.zip \
-            https://codeload.github.com/FongMi/Release/zip/refs/heads/fongmi
-          unzip -q fongmi.zip
+          # 获取最新 release 的完整 JSON
+          curl -sL \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/FongMi/Release/releases/latest \
+            -o release.json
 
-      - name: 收集 APK 文件
-        run: |
-          mkdir -p apk
-          find Release-fongmi/apk -type f -name "*.apk" -exec cp {} apk/ \;
-          echo "已收集的 APK："
-          ls -lh apk/
+          # 版本号
+          version=$(jq -r '.tag_name // .name // "未知版本"' release.json)
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "当前版本: $version"
 
-      - name: 下载并解析 JSON 文件（获取版本和日志）
-        run: |
-          curl -s -o leanback.json https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/leanback.json
-          curl -s -o mobile.json   https://raw.githubusercontent.com/FongMi/Release/fongmi/apk/mobile.json
-
-          version=$(jq -r '.name' leanback.json)
-          [ -z "$version" ] && version="未知版本"
-
-          desc_leanback=$(jq -r '.desc' leanback.json | sed 's/^\* //g')
-          desc_mobile=$(jq -r '.desc' mobile.json   | sed 's/^\* //g')
-
-          merged_logs=$(echo -e "$desc_leanback\n$desc_mobile" \
-            | sort | uniq \
-            | sed 's/^/• /g' \
+          # 更新日志（body），清洗后繁转简
+          body=$(jq -r '.body // ""' release.json)
+          # 去掉开头的 # 标题行、多余空行，统一变成 • 列表
+          cleaned=$(echo "$body" \
+            | sed 's/\r//g' \
+            | sed '/^# /d' \
+            | sed 's/^\* /• /g' \
+            | sed '/^$/d' \
             | opencc -c t2s.json)
 
           update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
 
           caption=$(
             printf "\n\n - 影视 · 蜂蜜版\n\n- 本次更新：\n%s\n\n - 当前版本：%s\n - 更新时间：%s" \
-              "$merged_logs" "$version" "$update_time"
+              "$cleaned" "$version" "$update_time"
           )
 
           {
@@ -64,6 +61,33 @@ jobs:
             echo "EOF"
           } >> $GITHUB_ENV
 
+          # 把 assets 信息也存下来，方便后面下载
+          jq -c '.assets' release.json > assets.json
+          echo "assets 数量: $(jq 'length' assets.json)"
+
+      - name: 下载最新 Release 的 APK
+        run: |
+          mkdir -p apk
+          # 需要的 4 个文件
+          for name in \
+            "leanback-arm64_v8a.apk" \
+            "leanback-armeabi_v7a.apk" \
+            "mobile-arm64_v8a.apk" \
+            "mobile-armeabi_v7a.apk"; do
+            
+            url=$(jq -r --arg n "$name" '.[] | select(.name==$n) | .browser_download_url' assets.json)
+            if [ -z "$url" ] || [ "$url" = "null" ]; then
+              echo "错误：找不到 $name"
+              exit 1
+            fi
+            echo "下载 $name ..."
+            curl -sL -o "apk/$name" "$url"
+          done
+
+          echo "已下载的 APK："
+          ls -lh apk/
+
+      # ========== 以下逻辑基本保持原样 ==========
       - name: 计算当前所有 APK 的 hash
         id: hash
         run: |
@@ -126,7 +150,7 @@ jobs:
           gh release create "${{ steps.tag.outputs.tag }}" \
             apk/*.apk \
             --title "FongMi APK ${{ steps.tag.outputs.tag }}" \
-            --notes "自动同步自：https://github.com/FongMi/Release/tree/fongmi/apk\n仅当 APK 内容发生变化时发布。" \
+            --notes "自动同步自：https://github.com/FongMi/Release/releases\n版本：${{ steps.release.outputs.version }}\n仅当 APK 内容发生变化时发布。" \
             || echo "Release 可能已存在，跳过创建"
 
       - name: 推送到 Telegram（使用 jq 构造 JSON）
