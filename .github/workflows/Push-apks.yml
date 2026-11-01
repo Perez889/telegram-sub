@@ -67,7 +67,7 @@ jobs:
           update_time=$(TZ=Asia/Shanghai date '+%Y/%m/%d %H:%M')
 
           caption=$(
-            printf "\n\n - 影视 · 蜂蜜版\n\n- 本次更新：\n%s\n\n - 当前版本：%s\n - 更新时间：%s" \
+            printf "\n\n - Tip：leanback-TV版  mobile-手机版\n\n- 本次更新：\n%s\n\n - 当前版本：%s\n - 更新时间：%s" \
               "$cleaned" "$version" "$update_time"
           )
 
